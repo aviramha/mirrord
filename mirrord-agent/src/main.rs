@@ -24,19 +24,19 @@ use tracing::{debug, error, info, trace};
 use tracing_subscriber::prelude::*;
 
 mod cli;
+mod common;
 mod error;
 mod file;
 mod runtime;
 mod sniffer;
+mod tcp;
 mod util;
 
-use cli::parse_args;
-use sniffer::{packet_worker, SnifferCommand, SnifferOutput};
-use util::{IndexAllocator, Subscriptions};
-
-use crate::file::file_worker;
-
-type PeerID = u32;
+use crate::cli::parse_args;
+use crate::sniffer::{packet_worker, SnifferCommand, SnifferOutput};
+use crate::util::{IndexAllocator};
+use crate::tcp::TcpSnifferHandler;
+use crate::{common::PeerID, file::file_worker};
 
 #[derive(Debug)]
 struct Peer {
@@ -69,24 +69,14 @@ impl Borrow<PeerID> for Peer {
     }
 }
 
-#[derive(Debug)]
-struct State {
-    pub peers: HashSet<Peer>,
+#[derive(Debug, Default)]
+struct Agent {
+    peers: HashSet<Peer>,
     index_allocator: IndexAllocator<PeerID>,
-    pub port_subscriptions: Subscriptions<Port, PeerID>,
-    pub connections_subscriptions: Subscriptions<ConnectionID, PeerID>,
+    tcp_sniffer_handler: TcpSnifferHandler,
 }
 
-impl State {
-    pub fn new() -> State {
-        State {
-            peers: HashSet::new(),
-            index_allocator: IndexAllocator::new(),
-            port_subscriptions: Subscriptions::new(),
-            connections_subscriptions: Subscriptions::new(),
-        }
-    }
-
+impl Agent {
     pub fn generate_id(&mut self) -> Option<PeerID> {
         self.index_allocator.next_index()
     }

@@ -8,7 +8,7 @@ use num_traits::{zero, CheckedAdd, Num};
 
 /// Struct that helps you manage topic -> subscribers
 /// When a topip has no subscribers, it is removed.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Subscriptions<T, C> {
     _inner: HashMap<T, HashSet<C>>,
 }
@@ -81,7 +81,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct IndexAllocator<T>
 where
     T: Num,
