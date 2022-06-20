@@ -242,10 +242,12 @@ impl PeerHandler {
                     .send(DaemonMessage::FileResponse(response))
                     .await
                     .map_err(From::from)
-            },
-            ClientMessage::Ping => {
-                self.stream.send(DaemonMessage::Pong).await.map_err(From::from)
-            },
+            }
+            ClientMessage::Ping => self
+                .stream
+                .send(DaemonMessage::Pong)
+                .await
+                .map_err(From::from),
             _ => {
                 let message = PeerMessage {
                     client_message: message,
