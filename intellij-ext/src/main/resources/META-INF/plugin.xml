@@ -11,15 +11,16 @@
 
     <depends>com.intellij.modules.lang</depends>
 
-    <extensions defaultExtensionNs="com.intellij">
-        <notificationGroup id="mirrord Notification Handler"
-                           displayType="BALLOON"/>
+    <extensions defaultExtensionNs="com.goide">
+        <runConfigurationExtension
+                implementation="com.metalbear.mirrord.GolandRunConfigurationExtension"
+                id="mirrordExt"/>
     </extensions>
 
-    <projectListeners>
-        <listener class="com.metalbear.mirrord.MirrordListener"
-                  topic="com.intellij.execution.ExecutionListener"/>
-    </projectListeners>
+<!--    <projectListeners>-->
+<!--        <listener class="com.metalbear.mirrord.MirrordListener"-->
+<!--                  topic="com.intellij.execution.ExecutionListener"/>-->
+<!--    </projectListeners>-->
 
     <actions>
         <action id="com.metalbear.mirrord.MirrordEnabler"
