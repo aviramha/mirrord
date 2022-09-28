@@ -10,20 +10,17 @@
 
 use std::{
     collections::{HashSet, VecDeque},
-    pin::Pin,
     sync::{LazyLock, OnceLock},
-    task::{Context, Poll},
 };
 
-use actix_codec::{AsyncRead, AsyncWrite, ReadBuf};
+use actix_codec::{AsyncRead, AsyncWrite};
 use common::{GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
 use envconfig::Envconfig;
 use error::{LayerError, Result};
 use file::OPEN_FILES;
 use frida_gum::{interceptor::Interceptor, Gum};
-use futures::{Sink, SinkExt, StreamExt};
-use kube::api::Portforwarder;
+use futures::{SinkExt, StreamExt};
 use libc::c_int;
 use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::{
@@ -31,14 +28,11 @@ use mirrord_protocol::{
     GetEnvVarsRequest,
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
-use rand::Rng;
 use socket::SOCKETS;
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
 use tcp_steal::TcpStealHandler;
 use tokio::{
-    io::DuplexStream,
-    net::TcpStream,
     runtime::Runtime,
     select,
     sync::mpsc::{channel, Receiver, Sender},
