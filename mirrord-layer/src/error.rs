@@ -137,6 +137,9 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Container `{0}` not found in namespace `{1}` pod `{2}`")]
     ContainerNotFound(String, String, String),
+
+    #[error("mirrord-layer: Impersonated pod name isn't set")]
+    ImpersonatedPodNameNotSet,
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.

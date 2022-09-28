@@ -15,7 +15,7 @@ pub struct LayerConfig {
     pub image_pull_policy: String,
 
     #[envconfig(from = "MIRRORD_AGENT_IMPERSONATED_POD_NAME")]
-    pub impersonated_pod_name: String,
+    pub impersonated_pod_name: Option<String>,
 
     #[envconfig(from = "MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE", default = "default")]
     pub impersonated_pod_namespace: String,
@@ -66,4 +66,8 @@ pub struct LayerConfig {
 
     #[envconfig(from = "MIRRORD_SKIP_PROCESSES")]
     pub skip_processes: Option<String>,
+
+    /// IP:PORT to connect to instead of using k8s api, for testing purposes.
+    #[envconfig(from = "MIRRORD_CONNECT_TCP")]
+    pub connect_tcp: Option<String>
 }
