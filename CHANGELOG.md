@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- Skip istio/linkerd-proxy/init container when mirroring a pod without a specific container name.
+- Add `"linkerd.io/inject": "disabled"` annotation to pod created by mirrord to avoid linkerd auto inject.
+
 ## 3.0.20-alpha
 
 ### Added

@@ -1,11 +1,10 @@
-use std::str::FromStr;
+use std::{str::FromStr, collections::HashSet};
 
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::{
-    apps::v1::Deployment,
     batch::v1::Job,
-    core::v1::{EphemeralContainer, Pod},
+    core::v1::{EphemeralContainer, Pod, ContainerStatus},
 };
 use kube::{
     api::{Api, ListParams, LogParams, Portforwarder, PostParams},
@@ -17,12 +16,13 @@ use mirrord_progress::TaskProgress;
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::{json, to_vec};
 use tokio::pin;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::{
     error::{LayerError, Result},
     MIRRORD_SKIP_LOAD,
 };
+
 
 struct EnvVarGuard {
     library: String,
@@ -336,7 +336,8 @@ async fn create_job_pod_agent(
                     },
                     "annotations":
                     {
-                        "sidecar.istio.io/inject": "false"
+                        "sidecar.istio.io/inject": "false",
+                        "linkerd.io/inject": "disabled"
                     }
                 },
                 "spec": {
@@ -346,7 +347,8 @@ async fn create_job_pod_agent(
                         "metadata": {
                             "annotations":
                             {
-                                "sidecar.istio.io/inject": "false"
+                                "sidecar.istio.io/inject": "false",
+                                "linkerd.io/inject": "disabled"
                             }
                         },
 
@@ -449,18 +451,9 @@ impl RuntimeData {
         let pod = pod_api.get(pod_name).await?;
         let node_name = &pod.spec.unwrap().node_name;
         let container_statuses = &pod.status.unwrap().container_statuses.unwrap();
-        let container_info = if let Some(container_name) = container_name {
-            &container_statuses
-                .iter()
-                .find(|&status| &status.name == container_name)
-                .ok_or_else(|| LayerError::ContainerNotFound(container_name.clone()))?
-                .container_id
-        } else {
-            info!("No container name specified, defaulting to first container found");
-            &container_statuses.first().unwrap().container_id
-        };
+        let chosen_container = choose_container(container_name, container_statuses).ok_or(LayerError::ContainerNotFound(()))?;
 
-        let container_info = container_info
+        let container_info = chosen_container.container_id
             .as_ref()
             .unwrap()
             .split("://")
@@ -542,6 +535,13 @@ impl RuntimeDataProvider for DeploymentData {
             ))
         })?;
 
+        let chosen_container = first_pod.status.and_then(| spec | choose_container(&None, spec.container_statuses)).ok_or_else(|| {
+            LayerError::ContainerNotFound(format!(
+                "Failed to fetch container for pod {:?}, deployment {}",
+                first_pod.clone(),
+                self.deployment.clone()
+            ))
+        })?;
         let (
             container_name,
             ContainerData {
@@ -554,7 +554,7 @@ impl RuntimeDataProvider for DeploymentData {
                 .clone()
                 .spec?
                 .containers
-                .first()
+                .find(|container| SKIP_CONTAINER_NAMES.contains(container.name)).or_else(?
                 .map(|container| container.name.clone())?;
             let container_runtime_and_id = first_pod
                 .clone()
@@ -566,13 +566,7 @@ impl RuntimeDataProvider for DeploymentData {
 
             Some((container_name, container_runtime_and_id))
         }()
-        .ok_or_else(|| {
-            LayerError::ContainerNotFound(format!(
-                "Failed to fetch container for pod {:?}, deployment {}",
-                first_pod.clone(),
-                self.deployment.clone()
-            ))
-        })
+
         .and_then(|(container_name, container_runtime_and_id)| {
             Ok((
                 container_name,
@@ -772,6 +766,22 @@ impl FromStr for ContainerData {
             container_runtime: container_runtime.to_string(),
             socket_path: socket_path.to_string(),
             container_id: container_id.to_string(),
+        })
+    }
+}
+
+/// Choose container logic:
+/// 1. Try to find based on given name
+/// 2. Try to find first container in pod that isn't a mesh side car
+/// 3. Take first container in pod
+fn choose_container<'a>(container_name: &Option<str>, container_statuses: &'a Vec<ContainerStatus>) -> Option<&'a ContainerStatus>  {
+    if let Some(name) = container_name {
+        container_statuses.iter().find(|&status| status.name == name)
+    } else {
+        let skip_names = HashSet::from(["istio-proxy", "linkerd-proxy", "proxy-init", "istio-init"]);
+        // Choose any container that isn't part of the skip list
+        container_statuses.iter().find(|&status| !skip_names.contains(status.name.as_str())).or_else(|| {
+            container_statuses.first()
         })
     }
 }
