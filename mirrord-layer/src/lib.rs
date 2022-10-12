@@ -88,6 +88,30 @@ pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
 pub(crate) const MIRRORD_SKIP_LOAD: &str = "MIRRORD_SKIP_LOAD";
 
+struct EnvVarGuard {
+    library: String,
+}
+
+impl EnvVarGuard {
+    #[cfg(target_os = "linux")]
+    const ENV_VAR: &str = "LD_PRELOAD";
+    #[cfg(target_os = "macos")]
+    const ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
+    fn new() -> Self {
+        std::env::set_var(MIRRORD_SKIP_LOAD, "true");
+        let library = std::env::var(EnvVarGuard::ENV_VAR).unwrap_or_default();
+        std::env::remove_var(EnvVarGuard::ENV_VAR);
+        Self { library }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        std::env::set_var(EnvVarGuard::ENV_VAR, &self.library);
+        std::env::set_var(MIRRORD_SKIP_LOAD, "false");
+    }
+}
+
 #[ctor]
 fn before_init() {
     if !cfg!(test) {
@@ -155,6 +179,7 @@ fn init(config: LayerConfig) {
         .init();
 
     info!("Initializing mirrord-layer!");
+    let _guard = EnvVarGuard::new();
 
     let connection = RUNTIME.block_on(connection::connect(&config));
 

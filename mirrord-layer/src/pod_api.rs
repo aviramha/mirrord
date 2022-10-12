@@ -24,37 +24,12 @@ use crate::{
     MIRRORD_SKIP_LOAD,
 };
 
-struct EnvVarGuard {
-    library: String,
-}
-
-impl EnvVarGuard {
-    #[cfg(target_os = "linux")]
-    const ENV_VAR: &str = "LD_PRELOAD";
-    #[cfg(target_os = "macos")]
-    const ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
-    fn new() -> Self {
-        std::env::set_var(MIRRORD_SKIP_LOAD, "true");
-        let library = std::env::var(EnvVarGuard::ENV_VAR).unwrap_or_default();
-        std::env::remove_var(EnvVarGuard::ENV_VAR);
-        Self { library }
-    }
-}
-
-impl Drop for EnvVarGuard {
-    fn drop(&mut self) {
-        std::env::set_var(EnvVarGuard::ENV_VAR, &self.library);
-        std::env::set_var(MIRRORD_SKIP_LOAD, "false");
-    }
-}
-
 pub(crate) async fn create_agent(
     config: LayerConfig,
     connection_port: u16,
 ) -> Result<Portforwarder> {
     let progress = TaskProgress::new("agent initializing...");
 
-    let _guard = EnvVarGuard::new();
     let LayerConfig {
         target,
         target_namespace,
