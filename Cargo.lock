@@ -1797,6 +1797,7 @@ name = "mirrord-sip"
 version = "3.0.22-alpha"
 dependencies = [
  "anyhow",
+ "memchr",
  "object",
  "tracing",
  "tracing-subscriber",
@@ -2101,6 +2102,8 @@ dependencies = [
 [[package]]
 name = "object"
 version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21158b2c33aa6d4561f1c0a6ea283ca92bc54802a93b263e910746d679a7eb53"
 dependencies = [
  "flate2",
  "memchr",
