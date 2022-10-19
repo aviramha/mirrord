@@ -33,7 +33,7 @@ use std::ops::Range;
 // }
 // use object::{File, read::macho::FatArch, macho::{FatHeader, CPU_TYPE_ARM64, CPU_SUBTYPE_PTRAUTH_ABI, FatArch64}, BigEndian};
 use anyhow::{anyhow, Result};
-use object::{BigEndian, macho::{FatHeader, FAT_MAGIC, FatArch64, CPU_TYPE_ARM64, CPU_SUBTYPE_ARM64E, CPU_TYPE_ARM64_32, FatArch32, CPU_SUBTYPE_PTRAUTH_ABI, MachHeader64}, LittleEndian};
+use object::{BigEndian, macho::{FatHeader, FAT_MAGIC, FatArch64, CPU_TYPE_ARM64, CPU_SUBTYPE_ARM64E, CPU_TYPE_ARM64_32, FatArch32, CPU_SUBTYPE_PTRAUTH_ABI, MachHeader64, CPU_SUBTYPE_ARM64_ALL}, LittleEndian};
 
 pub fn patch_binary(path: &str, output: &str) -> Result<()> {
     let mut data = std::fs::read(path)?;
@@ -47,38 +47,59 @@ pub fn patch_binary(path: &str, output: &str) -> Result<()> {
         start: std::mem::size_of::<FatHeader>(),
         end: std::mem::size_of::<FatHeader>() + arch_count * std::mem::size_of::<FatArch32>(),
     };
-    let (archs, _) : (&mut [FatArch32], _) = object::slice_from_bytes_mut(&mut data[archs_range], arch_count).unwrap();
-    let mut arch_offset = 0;
-    let mut arch_size = 0;
-    for arch in archs {
-        let cpu_type = arch.cputype.get(BigEndian);
-        let cpu_subtype = arch.cpusubtype.get(BigEndian);
-        println!("test: {:?}", cpu_type & CPU_TYPE_ARM64);
-        if cpu_type == CPU_TYPE_ARM64 && (cpu_subtype & CPU_SUBTYPE_ARM64E) > 0 {
-            arch.cpusubtype.set(BigEndian, cpu_subtype ^ CPU_SUBTYPE_ARM64E);
-            arch_offset = arch.offset.get(BigEndian) as usize;
-            arch_size = arch.size.get(BigEndian) as usize;
-            println!("patch1");
-        } else {
-            println!("{cpu_type:?} {cpu_subtype:?}");
-        }
-
-    }
+    {
+        let hash = md5::compute(&data);
+        println!("first: {:x}", hash);
+    }    
+    let (archs, _) : (&[FatArch32], _) = object::slice_from_bytes(&data[archs_range], arch_count).unwrap();
+    // let mut arch_offset = 0;
+    // let mut arch_size = 0;
     let range = Range {
-        start: arch_offset,
-        end: arch_offset + arch_size,
+        start: archs[0].offset.get(BigEndian) as usize,
+        end: archs[0].offset.get(BigEndian) as usize + archs[0].size.get(BigEndian) as usize,
     };
-    let (arch_header, _): (&mut MachHeader64<LittleEndian>, _) = object::from_bytes_mut(&mut data[range]).unwrap();
-    let cpu_type = arch_header.cputype.get(LittleEndian);
-    let cpu_subtype = arch_header.cpusubtype.get(LittleEndian);
-    println!("magic {:?}", arch_header.magic.get(BigEndian));
-    if cpu_type == CPU_TYPE_ARM64 && (cpu_subtype & CPU_SUBTYPE_ARM64E) > 0 {
-        println!("patch2");
-        arch_header.cpusubtype.set(LittleEndian, cpu_subtype ^ CPU_SUBTYPE_ARM64E);
-    } else {
-        println!("{cpu_type:?} {cpu_subtype:?}");
-    }
-    std::fs::write(output, data).unwrap();
+    let x64 = &data[range];
+
+    // for arch in archs {
+    //     let cpu_type = arch.cputype.get(BigEndian);
+    //     let cpu_subtype = arch.cpusubtype.get(BigEndian);
+    //     println!("test: {:?}", cpu_type & CPU_TYPE_ARM64);
+    //     if cpu_type == CPU_TYPE_ARM64 && (cpu_subtype & CPU_SUBTYPE_ARM64E) > 0 {
+    //         let val = CPU_SUBTYPE_ARM64_ALL; // CPU_SUBTYPE_ARM64_ALL; // (cpu_subtype ^ CPU_SUBTYPE_ARM64E) ^ ;
+    //         arch.cpusubtype.set(BigEndian, val);
+    //         arch_offset = arch.offset.get(BigEndian) as usize;
+    //         arch_size = arch.size.get(BigEndian) as usize;
+    //         println!("patch1 {val:?}");
+    //     } else {
+    //         println!("{cpu_type:?} {cpu_subtype:?}");
+
+    //     }
+
+    // }
+    // {
+    //     let hash = md5::compute(&data);
+    //     println!("second: {:x}", hash);
+    // }
+    // let range = Range {
+    //     start: arch_offset,
+    //     end: arch_offset + arch_size,
+    // };
+    // let (arch_header, _): (&mut MachHeader64<LittleEndian>, _) = object::from_bytes_mut(&mut data[range]).unwrap();
+    // let cpu_type = arch_header.cputype.get(LittleEndian);
+    // let cpu_subtype = arch_header.cpusubtype.get(LittleEndian);
+    // println!("magic {:?}", arch_header.magic.get(BigEndian));
+    // if cpu_type == CPU_TYPE_ARM64 && (cpu_subtype & CPU_SUBTYPE_ARM64E) > 0 {
+    //     println!("patch2");
+    //     let val = CPU_SUBTYPE_ARM64_ALL; // (cpu_subtype ^ CPU_SUBTYPE_ARM64E) ^ CPU_SUBTYPE_PTRAUTH_ABI;
+    //     arch_header.cpusubtype.set(LittleEndian, val);
+    // } else {
+    //     println!("{cpu_type:?} {cpu_subtype:?}");
+    // }
+    // {
+    //     let hash = md5::compute(&data);
+    //     println!("last: {:x}", hash);
+    // }
+    std::fs::write(output, x64).unwrap();
     Ok(())
 }
 
