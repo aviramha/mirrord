@@ -7,6 +7,7 @@
 //         command.command()
 //     })
 // }
+mod codesign;
 
 
 use std::ops::Range;
@@ -59,7 +60,7 @@ pub fn patch_binary(path: &str, output: &str) -> Result<()> {
         end: archs[0].offset.get(BigEndian) as usize + archs[0].size.get(BigEndian) as usize,
     };
     let x64 = &data[range];
-
+    
     // for arch in archs {
     //     let cpu_type = arch.cputype.get(BigEndian);
     //     let cpu_subtype = arch.cpusubtype.get(BigEndian);
