@@ -19,6 +19,7 @@ mirrord-config = { path = "../mirrord-config"}
 mirrord-protocol = { path = "../mirrord-protocol"}
 mirrord-macro = { path = "../mirrord-macro"}
 mirrord-progress = { path = "../mirrord-progress" }
+mirrord-sip = { path = "../mirrord-sip" }
 
 ctor = "0.1"
 libc = "0.2"
