@@ -19,6 +19,9 @@ pub enum SipError {
     #[error("ObjectParse failed with `{0}`")]
     ObjectParse(#[from] object::Error),
 
+    #[error("which failed with `{0}`")]
+    WhichFailed(#[from] which::Error),
+
     #[error("Unlikely error happened `{0}`")]
     UnlikelyError(String),
 }

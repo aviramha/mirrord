@@ -1657,7 +1657,6 @@ dependencies = [
  "semver 1.0.14",
  "tracing",
  "tracing-subscriber",
- "which 4.3.0",
 ]
 
 [[package]]
@@ -1811,6 +1810,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tracing",
+ "which 4.3.0",
 ]
 
 [[package]]

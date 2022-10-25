@@ -1,5 +1,6 @@
-use crate::error::{Result, SipError};
 use std::{path::Path, process::Command};
+
+use crate::error::{Result, SipError};
 
 pub(crate) fn sign<P: AsRef<Path>>(path: P) -> Result<()> {
     let output = Command::new("codesign")

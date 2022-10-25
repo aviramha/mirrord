@@ -11,12 +11,12 @@ use config::*;
 use exec::execvp;
 use mirrord_auth::AuthConfig;
 use mirrord_progress::TaskProgress;
+#[cfg(target_os = "macos")]
+use mirrord_sip::sip_patch;
 use rand::distributions::{Alphanumeric, DistString};
 use semver::Version;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
-#[cfg(target_os = "macos")]
-use mirrord_sip::sip_patch;
 
 mod config;
 

@@ -1,14 +1,16 @@
 #[cfg(target_os = "macos")]
 mod codesign;
-
 #[cfg(target_os = "macos")]
 mod error;
+#[cfg(target_os = "macos")]
+mod whitespace;
 
 #[cfg(target_os = "macos")]
 mod main {
-
     use std::{
+        env::temp_dir,
         fs::Permissions,
+        io::{self, Read},
         os::{macos::fs::MetadataExt, unix::prelude::PermissionsExt},
         path::Path,
     };
@@ -18,8 +20,11 @@ mod main {
         read::macho::{FatArch, MachHeader},
         Architecture, Endianness, FileKind,
     };
+    use which::which;
 
-    use crate::error::{Result, SipError};
+    use super::*;
+    use crate::error::Result;
+    pub use crate::error::SipError;
 
     fn is_fat_x64_arch(arch: &&impl FatArch) -> bool {
         matches!(arch.architecture(), Architecture::X86_64)
@@ -95,11 +100,57 @@ mod main {
 
     const SF_RESTRICTED: u32 = 0x00080000; // entitlement required for writing, from stat.h (macos)
 
+    fn read_shebang<P: AsRef<Path>>(path: P) -> Result<Option<String>> {
+        let mut f = std::fs::File::open(path)?;
+        let mut buffer = String::new();
+        match f.read_to_string(&mut buffer) {
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::InvalidData => return Ok(None),
+            Err(e) => return Err(SipError::IO(e)),
+        }
+
+        const BOM: &str = "\u{feff}";
+        let mut content: &str = &buffer;
+        if content.starts_with(BOM) {
+            content = &content[BOM.len()..];
+        }
+
+        let mut shebang = None;
+        if content.starts_with("#!") {
+            let rest = whitespace::skip(&content[2..]);
+            if !rest.starts_with('[') {
+                let full_shebang = if let Some(idx) = content.find('\n') {
+                    &content[..idx]
+                } else {
+                    content
+                };
+                shebang = full_shebang
+                    .split_whitespace()
+                    .next()
+                    .map(|s| s.to_string());
+            }
+        }
+        Ok(shebang)
+    }
+
+    enum BinaryType {
+        Executable,
+        Shebang(String),
+    }
+
     /// Checks the SF_RESTRICTED flags on a file (there might be a better check, feel free to
     /// suggest)
     fn is_sip<P: AsRef<Path>>(path: P) -> Result<bool> {
-        let metadata = std::fs::metadata(path)?;
-        Ok((metadata.st_flags() & SF_RESTRICTED) > 0)
+        let metadata = std::fs::metadata(&path)?;
+        if (metadata.st_flags() & SF_RESTRICTED) > 0 {
+            return Ok(true);
+        }
+        if let Some(path) = read_shebang(&path)? {
+            let full_path = which(&path)?;
+            is_sip(full_path)
+        } else {
+            return Ok(false);
+        }
     }
 
     pub fn sip_patch(binary_path: &mut String) -> Result<()> {
@@ -110,32 +161,35 @@ mod main {
         }
 
         // Strip root path from binary path, as when joined it will clear the previous.
-        let output = temp_dir()
-            .join("mirrord-bin")
-            .join(&complete_path.strip_prefix("/")?);
+        let output = temp_dir().join("mirrord-bin").join(
+            &complete_path
+                .strip_prefix("/")
+                .map_err(|e| SipError::UnlikelyError(e.to_string()))?,
+        );
 
         // Patched version already exists
         if output.exists() {
-            trace!("exists {:?}", &output);
             *binary_path = output
                 .to_str()
-                .ok_or_else(|| anyhow!("Failed to convert path to string"))?
+                .ok_or_else(|| {
+                    SipError::UnlikelyError("Failed to convert path to string".to_string())
+                })?
                 .to_string();
             return Ok(());
         }
 
-        std::fs::create_dir_all(
-            output
-                .parent()
-                .ok_or_else(|| SipError::UnlikelyError("Failed to get parent directory"))?,
-        )?;
+        std::fs::create_dir_all(output.parent().ok_or_else(|| {
+            SipError::UnlikelyError("Failed to get parent directory".to_string())
+        })?)?;
+
         if let Ok(()) = patch_binary(&complete_path, &output) {
             *binary_path = output
                 .to_str()
-                .ok_or_else(|| anyhow!("Failed to convert path to string"))?
+                .ok_or_else(|| {
+                    SipError::UnlikelyError("Failed to convert path to string".to_string())
+                })?
                 .to_string();
         }
-        trace!("patched successfuly {:?}", &output);
         Ok(())
     }
 
