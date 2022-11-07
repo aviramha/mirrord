@@ -315,7 +315,8 @@ pub(super) fn connect(
                     return Some(raw_connect(address));
                 }
             }
-            None
+            // Patch for erry - if localhost, connect directly instead of through agent.
+            Some(raw_connect(remote_address))
         }) {
         return res;
     };
