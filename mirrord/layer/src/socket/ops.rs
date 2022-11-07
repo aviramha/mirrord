@@ -302,24 +302,9 @@ pub(super) fn connect(
 
     // if it's loopback, check if it's a port we're listening to and if so, just let it connect
     // locally.
-    if remote_address.ip().is_loopback() && let Some(res) =
-        SOCKETS.lock()?.values().find_map(|socket| {
-            if let SocketState::Listening(Bound {
-                requested_port,
-                address,
-            }) = socket.state
-            {
-                if requested_port == remote_address.port()
-                    && socket.protocol == user_socket_info.protocol
-                {
-                    return Some(raw_connect(address));
-                }
-            }
-            // Patch for erry - if localhost, connect directly instead of through agent.
-            Some(raw_connect(remote_address))
-        }) {
-        return res;
-    };
+    if remote_address.ip().is_loopback() {
+        return raw_connect(remote_address);
+    }
 
     match user_socket_info.kind {
         SocketKind::Udp(_) if enabled_udp_outgoing => {
