@@ -16,6 +16,11 @@ pub(super) enum Commands {
         #[clap(value_parser)]
         path: String,
     },
+    #[command(name="ls", hide=true)]
+    Ls {
+        #[clap(short = 'n', long, value_parser)]
+        namespace: Option<String>,
+    },
     // Login(LoginArgs),
 }
 

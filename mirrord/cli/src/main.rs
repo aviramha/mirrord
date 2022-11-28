@@ -286,6 +286,7 @@ fn main() -> Result<()> {
         Commands::Extract { path } => {
             extract_library(Some(path), &progress)?;
         } // Commands::Login(args) => login(args)?,
+        _ => {}
     }
     Ok(())
 }
