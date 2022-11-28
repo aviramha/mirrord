@@ -20,7 +20,7 @@ pub(super) enum Commands {
     },
     #[command(name="ls", hide=true)]
     Ls {
-        #[clap(short = 'n', long, value_parser)]
+        #[arg(short = 'n', long)]
         namespace: Option<String>,
     },
     // Login(LoginArgs),
