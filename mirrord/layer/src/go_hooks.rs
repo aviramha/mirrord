@@ -1,4 +1,4 @@
-use std::arch::asm;
+use std::{arch::asm, sync::LazyLock};
 
 use errno::errno;
 use tracing::trace;
@@ -7,6 +7,14 @@ use crate::{
     close_detour, file::hooks::*, hooks::HookManager, macros::hook_symbol, socket::hooks::*,
     FILE_MODE,
 };
+
+static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+});
+
 /*
  * Reference for which syscalls are managed by the handlers:
  * SYS_openat: Syscall6
@@ -311,85 +319,23 @@ unsafe extern "C" fn c_abi_syscall_handler(
     param2: i64,
     param3: i64,
 ) -> i64 {
-    trace!(
-        "c_abi_syscall_handler: syscall={} param1={} param2={} param3={}",
-        syscall,
-        param1,
-        param2,
-        param3
-    );
-    let res = match syscall {
-        libc::SYS_socket => socket_detour(param1 as _, param2 as _, param3 as _) as i64,
-        libc::SYS_bind => bind_detour(param1 as _, param2 as _, param3 as _) as i64,
-        libc::SYS_listen => listen_detour(param1 as _, param2 as _) as i64,
-        libc::SYS_connect => connect_detour(param1 as _, param2 as _, param3 as _) as i64,
-        libc::SYS_accept => accept_detour(param1 as _, param2 as _, param3 as _) as i64,
-        libc::SYS_close => close_detour(param1 as _) as i64,
+    RUNTIME.block_on({
+        trace!(
+            "c_abi_syscall_handler: syscall={} param1={} param2={} param3={}",
+            syscall,
+            param1,
+            param2,
+            param3
+        );
+        let res = match syscall {
+            libc::SYS_socket => socket_detour(param1 as _, param2 as _, param3 as _) as i64,
+            libc::SYS_bind => bind_detour(param1 as _, param2 as _, param3 as _) as i64,
+            libc::SYS_listen => listen_detour(param1 as _, param2 as _) as i64,
+            libc::SYS_connect => connect_detour(param1 as _, param2 as _, param3 as _) as i64,
+            libc::SYS_accept => accept_detour(param1 as _, param2 as _, param3 as _) as i64,
+            libc::SYS_close => close_detour(param1 as _) as i64,
 
-        _ if FILE_MODE.get().unwrap().is_active() => match syscall {
-            libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
-            libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,
-            libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _),
-            // Note(syscall_linux.go)
-            // if flags == 0 {
-            // 	return faccessat(dirfd, path, mode)
-            // }
-            // The Linux kernel faccessat system call does not take any flags.
-            // The glibc faccessat implements the flags itself; see
-            // https://sourceware.org/git/?p=glibc.git;a=blob;f=sysdeps/unix/sysv/linux/faccessat.c;hb=HEAD
-            // Because people naturally expect syscall.Faccessat to act
-            // like C faccessat, we do the same.
-            libc::SYS_faccessat => {
-                faccessat_detour(param1 as _, param2 as _, param3 as _, 0) as i64
-            }
-            _ => {
-                let syscall_res = syscall_3(syscall, param1, param2, param3);
-                return syscall_res;
-            }
-        },
-        _ => {
-            let syscall_res = syscall_3(syscall, param1, param2, param3);
-            return syscall_res;
-        }
-    };
-    match res {
-        -1 => -errno().0 as i64,
-        _ => res,
-    }
-}
-
-/// Syscall & Syscall6 handler - supports upto 6 params, mainly used for
-/// accept4 Note: Depending on success/failure Syscall may or may not call this handler
-#[no_mangle]
-unsafe extern "C" fn c_abi_syscall6_handler(
-    syscall: i64,
-    param1: i64,
-    param2: i64,
-    param3: i64,
-    param4: i64,
-    param5: i64,
-    param6: i64,
-) -> i64 {
-    trace!(
-        "c_abi_syscall6_handler: syscall={} param1={} param2={} param3={} param4={} param5={} param6={}",
-        syscall, param1, param2, param3, param4, param5, param6
-    );
-    let res = match syscall {
-        libc::SYS_accept4 => {
-            accept4_detour(param1 as _, param2 as _, param3 as _, param4 as _) as i64
-        }
-        libc::SYS_socket => socket_detour(param1 as _, param2 as _, param3 as _) as i64,
-        libc::SYS_bind => bind_detour(param1 as _, param2 as _, param3 as _) as i64,
-        libc::SYS_listen => listen_detour(param1 as _, param2 as _) as i64,
-        libc::SYS_accept => accept_detour(param1 as _, param2 as _, param3 as _) as i64,
-        libc::SYS_close => close_detour(param1 as _) as i64,
-
-        _ if FILE_MODE
-            .get()
-            .expect("FILE_MODE needs to be initialized")
-            .is_active() =>
-        {
-            match syscall {
+            _ if FILE_MODE.get().unwrap().is_active() => match syscall {
                 libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
                 libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,
                 libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _),
@@ -405,23 +351,89 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                 libc::SYS_faccessat => {
                     faccessat_detour(param1 as _, param2 as _, param3 as _, 0) as i64
                 }
-                libc::SYS_openat => openat_detour(param1 as _, param2 as _, param3 as _) as i64,
                 _ => {
-                    let syscall_res =
-                        syscall_6(syscall, param1, param2, param3, param4, param5, param6);
+                    let syscall_res = syscall_3(syscall, param1, param2, param3);
                     return syscall_res;
                 }
+            },
+            _ => {
+                let syscall_res = syscall_3(syscall, param1, param2, param3);
+                return syscall_res;
             }
+        };
+        match res {
+            -1 => -errno().0 as i64,
+            _ => res,
         }
-        _ => {
-            let syscall_res = syscall_6(syscall, param1, param2, param3, param4, param5, param6);
-            return syscall_res;
+    })
+}
+
+/// Syscall & Syscall6 handler - supports upto 6 params, mainly used for
+/// accept4 Note: Depending on success/failure Syscall may or may not call this handler
+#[no_mangle]
+unsafe extern "C" fn c_abi_syscall6_handler(
+    syscall: i64,
+    param1: i64,
+    param2: i64,
+    param3: i64,
+    param4: i64,
+    param5: i64,
+    param6: i64,
+) -> i64 {
+    RUNTIME.block_on({
+        trace!(
+            "c_abi_syscall6_handler: syscall={} param1={} param2={} param3={} param4={} param5={} param6={}",
+            syscall, param1, param2, param3, param4, param5, param6
+        );
+        let res = match syscall {
+            libc::SYS_accept4 => {
+                accept4_detour(param1 as _, param2 as _, param3 as _, param4 as _) as i64
+            }
+            libc::SYS_socket => socket_detour(param1 as _, param2 as _, param3 as _) as i64,
+            libc::SYS_bind => bind_detour(param1 as _, param2 as _, param3 as _) as i64,
+            libc::SYS_listen => listen_detour(param1 as _, param2 as _) as i64,
+            libc::SYS_accept => accept_detour(param1 as _, param2 as _, param3 as _) as i64,
+            libc::SYS_close => close_detour(param1 as _) as i64,
+
+            _ if FILE_MODE
+                .get()
+                .expect("FILE_MODE needs to be initialized")
+                .is_active() =>
+            {
+                match syscall {
+                    libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
+                    libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,
+                    libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _),
+                    // Note(syscall_linux.go)
+                    // if flags == 0 {
+                    // 	return faccessat(dirfd, path, mode)
+                    // }
+                    // The Linux kernel faccessat system call does not take any flags.
+                    // The glibc faccessat implements the flags itself; see
+                    // https://sourceware.org/git/?p=glibc.git;a=blob;f=sysdeps/unix/sysv/linux/faccessat.c;hb=HEAD
+                    // Because people naturally expect syscall.Faccessat to act
+                    // like C faccessat, we do the same.
+                    libc::SYS_faccessat => {
+                        faccessat_detour(param1 as _, param2 as _, param3 as _, 0) as i64
+                    }
+                    libc::SYS_openat => openat_detour(param1 as _, param2 as _, param3 as _) as i64,
+                    _ => {
+                        let syscall_res =
+                            syscall_6(syscall, param1, param2, param3, param4, param5, param6);
+                        return syscall_res;
+                    }
+                }
+            }
+            _ => {
+                let syscall_res = syscall_6(syscall, param1, param2, param3, param4, param5, param6);
+                return syscall_res;
+            }
+        };
+        match res {
+            -1 => -errno().0 as i64,
+            _ => res,
         }
-    };
-    match res {
-        -1 => -errno().0 as i64,
-        _ => res,
-    }
+    })
 }
 
 /// [Naked function] 3 param version (Syscall6) for making the syscall, libc's syscall is not
