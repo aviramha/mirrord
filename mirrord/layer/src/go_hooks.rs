@@ -312,7 +312,7 @@ unsafe extern "C" fn c_abi_syscall_handler(
     param2: i64,
     param3: i64,
 ) -> i64 {
-    thread::spawn(|| {
+    thread::spawn(move || {
         trace!(
             "c_abi_syscall_handler: syscall={} param1={} param2={} param3={}",
             syscall,
@@ -375,7 +375,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
     param5: i64,
     param6: i64,
 ) -> i64 {
-    thread::spawn(|| {
+    thread::spawn(move || {
         trace!(
             "c_abi_syscall6_handler: syscall={} param1={} param2={} param3={} param4={} param5={} param6={}",
             syscall, param1, param2, param3, param4, param5, param6
