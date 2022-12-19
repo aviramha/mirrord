@@ -1,4 +1,4 @@
-use std::{arch::asm, sync::LazyLock};
+use std::{arch::asm, thread};
 
 use errno::errno;
 use tracing::trace;
@@ -7,13 +7,6 @@ use crate::{
     close_detour, file::hooks::*, hooks::HookManager, macros::hook_symbol, socket::hooks::*,
     FILE_MODE,
 };
-
-static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-});
 
 /*
  * Reference for which syscalls are managed by the handlers:
@@ -319,7 +312,7 @@ unsafe extern "C" fn c_abi_syscall_handler(
     param2: i64,
     param3: i64,
 ) -> i64 {
-    RUNTIME.block_on({
+    thread::spawn(|| {
         trace!(
             "c_abi_syscall_handler: syscall={} param1={} param2={} param3={}",
             syscall,
@@ -366,6 +359,8 @@ unsafe extern "C" fn c_abi_syscall_handler(
             _ => res,
         }
     })
+    .join()
+    .unwrap()
 }
 
 /// Syscall & Syscall6 handler - supports upto 6 params, mainly used for
@@ -380,7 +375,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
     param5: i64,
     param6: i64,
 ) -> i64 {
-    RUNTIME.block_on({
+    thread::spawn(|| {
         trace!(
             "c_abi_syscall6_handler: syscall={} param1={} param2={} param3={} param4={} param5={} param6={}",
             syscall, param1, param2, param3, param4, param5, param6
@@ -433,7 +428,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
             -1 => -errno().0 as i64,
             _ => res,
         }
-    })
+    }).join().unwrap()
 }
 
 /// [Naked function] 3 param version (Syscall6) for making the syscall, libc's syscall is not
