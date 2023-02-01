@@ -77,6 +77,9 @@ pub(crate) enum HookError {
     #[cfg(target_os = "macos")]
     #[error("mirrord-layer: SIP patch failed with error `{0}`!")]
     FailedSipPatch(#[from] SipError),
+
+    #[error("mirrord-layer: `fdopen` called with lower mode than fd was opened!")]
+    ModeMismatch
 }
 
 /// Errors internal to mirrord-layer.
@@ -234,6 +237,7 @@ impl From<HookError> for i64 {
             HookError::LocalFileCreation(_) => libc::EINVAL,
             #[cfg(target_os = "macos")]
             HookError::FailedSipPatch(_) => libc::EACCES,
+            HookError::ModeMismatch => libc::EINVAL
         };
 
         set_errno(errno::Errno(libc_error));

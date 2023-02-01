@@ -215,20 +215,28 @@ pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<usize> {
 
             Bypass::CStrConversion
         })
-        .map(String::from).map(OpenOptionsInternalExt::from_mode)?;
+        .map(String::from)
+        .map(OpenOptionsInternalExt::from_mode)?;
 
     trace!("fdopen -> open_options {open_options:#?}");
 
+    // Check that file is already open, if not bypass. if open, check mode is compatible, if not return
+    // error
+    OPEN_FILES.lock()?.get(&fd).ok_or(Bypass::LocalFdNotFound(fd)).map( | file | {
+        let open_file_options = file.open_options;
+        if open_file_options < open_options {
+            warn!("fdopen -> open_options {open_options:#?} < open_file.open_options {open_file_options:#?}");
+            return Detour::Error(HookError::ModeMismatch);
+        }
+        Detour::Success(())
+    })??;
+
+    let file_stream = FileStream::new(fd);
     // TODO: Check that the constraint: remote file must have the same mode stuff that is passed
     // here.
-    let result = OPEN_FILES
-        .lock()?
-        .get_key_value(&fd)
-        .ok_or(Bypass::LocalFdNotFound(fd))
-        .inspect(|(local_fd, remote_fd)| trace!("fdopen -> {local_fd:#?} {remote_fd:#?}"))
-        .map(|(local_fd, _)| local_fd as *const _ as *mut _)?;
+    OPEN_FILE_STREAMS.lock()?.insert(fd, file_stream);
 
-    Detour::Success(result)
+    Detour::Success(fd as usize)
 }
 
 /// creates a directory stream for the `remote_fd` in the agent
