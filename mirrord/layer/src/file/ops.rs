@@ -1,7 +1,7 @@
 use core::ffi::CStr;
 use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
-use libc::{c_int, c_uint, AT_FDCWD, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
+use libc::{c_int, c_uint, AT_FDCWD, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::file::{
     OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse, WriteFileResponse,
     XstatResponse,
@@ -17,7 +17,7 @@ use crate::{
     HookMessage,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub(crate) struct RemoteFile {
     pub fd: u64,
     pub open_options: OpenOptionsInternal,
@@ -155,7 +155,7 @@ pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal
 
     let requesting_file = Open {
         path,
-        open_options,
+        open_options: open_options.clone(),
         file_channel_tx,
     };
 
@@ -172,7 +172,7 @@ pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal
     OPEN_FILES
         .lock()
         .unwrap()
-        .insert(local_file_fd, Arc::new(RemoteFile::new(remote_fd)));
+        .insert(local_file_fd, Arc::new(RemoteFile::new(remote_fd, open_options)));
 
     Detour::Success(local_file_fd)
 }
@@ -328,7 +328,7 @@ pub(crate) fn openat(
         let requesting_file = OpenRelative {
             relative_fd: remote_fd,
             path,
-            open_options,
+            open_options: open_options.clone(),
             file_channel_tx,
         };
 
@@ -340,7 +340,7 @@ pub(crate) fn openat(
 
         OPEN_FILES
             .lock()?
-            .insert(local_file_fd, Arc::new(RemoteFile::new(remote_fd)));
+            .insert(local_file_fd, Arc::new(RemoteFile::new(remote_fd, open_options)));
 
         Detour::Success(local_file_fd)
     }

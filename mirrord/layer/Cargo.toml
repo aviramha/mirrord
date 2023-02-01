@@ -59,7 +59,6 @@ os_info = "3"
 bytemuck = "1"
 hyper = { workspace = true, features = ["client"] }
 http-body-util  = { workspace = true }
-parking_lot = "0.12.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

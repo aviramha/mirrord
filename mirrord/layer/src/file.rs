@@ -30,7 +30,6 @@ use mirrord_protocol::{
     },
     ClientMessage, FileRequest, FileResponse, RemoteResult,
 };
-use parking_lot::RawMutex;
 use tokio::sync::mpsc::Sender;
 use tracing::{error, trace, warn};
 
@@ -61,8 +60,9 @@ pub(crate) struct FileStream {
     pub(crate) last_error: c_int,
     /// is EOF for `feof` implementation
     pub(crate) is_eof: bool,
-    /// for `flockfile`/`stuff_unlocked` implementation
-    pub(crate) lock: parking_lot::Mutex<()>,
+    /// for `flockfile`/`stuff_unlocked` implementation - skipped for now, leaving this
+    /// in case we need to implement it later on.
+    // pub(crate) lock: parking_lot::Mutex<()>,
 }
 
 impl FileStream {
