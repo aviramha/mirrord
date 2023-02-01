@@ -2233,6 +2233,7 @@ dependencies = [
  "null-terminated",
  "num-traits",
  "os_info",
+ "parking_lot",
  "rand 0.8.5",
  "regex",
  "rstest 0.15.0",

@@ -180,6 +180,12 @@ pub(crate) enum Bypass {
     /// `intercept_tmp_dir`
     #[cfg(target_os = "macos")]
     TooManyArgs,
+
+    /// open mode is null
+    NullMode,
+
+    /// open mode is invalid
+    InvalidFileMode(String)
 }
 
 /// [`ControlFlow`](std::ops::ControlFlow)-like enum to be used by hooks.

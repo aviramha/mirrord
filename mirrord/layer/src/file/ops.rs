@@ -20,11 +20,12 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RemoteFile {
     pub fd: u64,
+    pub open_options: OpenOptionsInternal,
 }
 
 impl RemoteFile {
-    pub(crate) fn new(fd: u64) -> Self {
-        Self { fd }
+    pub(crate) fn new(fd: u64, open_options: OpenOptionsInternal) -> Self {
+        Self { fd, open_options }
     }
 }
 
@@ -178,7 +179,7 @@ pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal
 
 /// Calls [`open`] and returns a [`FILE`] pointer based on the **local** `fd`.
 #[tracing::instrument(level = "trace")]
-pub(crate) fn fopen(rawish_path: Option<&CStr>, rawish_mode: Option<&CStr>) -> Detour<*mut FILE> {
+pub(crate) fn fopen(rawish_path: Option<&CStr>, rawish_mode: Option<&CStr>) -> Detour<usize> {
     let open_options: OpenOptionsInternal = rawish_mode
         .map(CStr::to_str)
         .transpose()
@@ -195,21 +196,17 @@ pub(crate) fn fopen(rawish_path: Option<&CStr>, rawish_mode: Option<&CStr>) -> D
         .unwrap_or_default();
 
     let local_file_fd = open(rawish_path, open_options)?;
-    let result = OPEN_FILES
+    OPEN_FILE_STREAMS
         .lock()?
-        .get_key_value(&local_file_fd)
-        .ok_or(Bypass::LocalFdNotFound(local_file_fd))
-        // Convert the fd into a `*FILE`, this is be ok as long as `OPEN_FILES` holds the fd.
-        .map(|(local_fd, _)| local_fd as *const _ as *mut _)?;
+        .insert(local_file_fd, FileStream::new(local_file_fd));
 
-    Detour::Success(result)
+    Detour::Success(local_file_fd as usize)
 }
 
 #[tracing::instrument(level = "trace")]
-pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE> {
-    let _open_options: OpenOptionsInternal = rawish_mode
-        .map(CStr::to_str)
-        .transpose()
+pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<usize> {
+    let rawish_mode = rawish_mode.ok_or(HookError::NullPointer)?;
+    let open_options = CStr::to_str(rawish_mode)
         .map_err(|fail| {
             warn!(
                 "Failed converting `rawish_mode` from `CStr` with {:#?}",
@@ -217,12 +214,10 @@ pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE>
             );
 
             Bypass::CStrConversion
-        })?
-        .map(String::from)
-        .map(OpenOptionsInternalExt::from_mode)
-        .unwrap_or_default();
+        })
+        .map(String::from).map(OpenOptionsInternalExt::from_mode)?;
 
-    trace!("fdopen -> open_options {_open_options:#?}");
+    trace!("fdopen -> open_options {open_options:#?}");
 
     // TODO: Check that the constraint: remote file must have the same mode stuff that is passed
     // here.

@@ -30,6 +30,7 @@ use mirrord_protocol::{
     },
     ClientMessage, FileRequest, FileResponse, RemoteResult,
 };
+use parking_lot::RawMutex;
 use tokio::sync::mpsc::Sender;
 use tracing::{error, trace, warn};
 
@@ -45,10 +46,32 @@ pub(crate) mod ops;
 type LocalFd = RawFd;
 type RemoteFd = u64;
 type DirStreamFd = usize;
+type FileStreamFd = RawFd;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DirStream {
     direntry: Box<DirEntryInternal>,
+}
+
+#[derive(Default)]
+pub(crate) struct FileStream {
+    /// Raw Fd to use for operations (should be one managed by mirrord)
+    pub(crate) fd: RawFd,
+    /// Last error for `ferror` implementation
+    pub(crate) last_error: c_int,
+    /// is EOF for `feof` implementation
+    pub(crate) is_eof: bool,
+    /// for `flockfile`/`stuff_unlocked` implementation
+    pub(crate) lock: parking_lot::Mutex<()>,
+}
+
+impl FileStream {
+    pub(crate) fn new(fd: RawFd) -> Self {
+        Self {
+            fd,
+            ..Default::default()
+        }
+    }
 }
 
 /// `OPEN_FILES` is used to track open files and their corrospending remote file descriptor.
@@ -59,6 +82,11 @@ pub(crate) static OPEN_FILES: LazyLock<Mutex<HashMap<LocalFd, Arc<ops::RemoteFil
     LazyLock::new(|| Mutex::new(HashMap::with_capacity(4)));
 
 pub(crate) static OPEN_DIRS: LazyLock<Mutex<HashMap<DirStreamFd, RemoteFd>>> =
+    LazyLock::new(|| Mutex::new(HashMap::with_capacity(4)));
+
+/// `OPEN_FILE_STREAMS` is to track open file streams, this is used as part of the `f` family
+/// `fopen`, `fread`, `fwrite`, `fclose`, etc.
+pub(crate) static OPEN_FILE_STREAMS: LazyLock<Mutex<HashMap<FileStreamFd, FileStream>>> =
     LazyLock::new(|| Mutex::new(HashMap::with_capacity(4)));
 
 /// Extension trait for [`OpenOptionsInternal`], used to convert between `libc`-ish open options and
