@@ -22,7 +22,7 @@ use crate::{
     dns::GetAddrInfo,
     error::HookError,
     file::{self, OPEN_FILES},
-    outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
+    outgoing::{router::*, tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
     port_debug_patch,
     tcp::{Listen, TcpIncoming},
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING,

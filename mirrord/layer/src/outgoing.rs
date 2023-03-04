@@ -13,6 +13,7 @@ use crate::common::ResponseChannel;
 
 pub(crate) mod tcp;
 pub(crate) mod udp;
+pub(crate) mod router;
 
 /// Wrapper type for the (layer) socket address that intercepts the user's socket messages.
 #[derive(Debug)]
