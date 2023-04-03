@@ -99,6 +99,7 @@ use mirrord_protocol::{
     tcp::{HttpResponse, LayerTcpSteal},
     ClientMessage, DaemonMessage,
 };
+use nix::sys::signal::{self, SigHandler, SigSet};
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
 use regex::RegexSet;
 use socket::SOCKETS;
@@ -114,7 +115,7 @@ use tokio::{
     },
     time::{sleep, Duration},
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, log::warn, trace};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -710,6 +711,10 @@ impl Layer {
     }
 }
 
+extern "C" fn signal_handler(signal: libc::c_int) {
+    debug!("Received signal {}", signal);
+}
+
 /// Main loop of mirrord-layer.
 ///
 /// ## Parameters
@@ -742,6 +747,20 @@ async fn thread_loop(
     rx: Receiver<DaemonMessage>,
     config: LayerConfig,
 ) {
+    let signals = SigSet::all();
+
+    let action = SigHandler::Handler(signal_handler);
+    let sig_action = signal::SigAction::new(action, signal::SaFlags::empty(), SigSet::empty());
+    for sig in signals.iter() {
+        unsafe {
+            signal::sigaction(sig, &sig_action)
+                .map(|_| ())
+                .unwrap_or_else(|_| {
+                    warn!("Failed to set signal handler for signal {}", sig);
+                });
+        }
+    }
+
     let LayerConfig {
         feature:
             FeatureConfig {
@@ -863,6 +882,22 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
     let mut hook_manager = HookManager::default();
 
     unsafe {
+        replace!(&mut hook_manager, "exit", exit_detour, FnExit, FN_EXIT);
+        replace!(
+            &mut hook_manager,
+            "signal",
+            signal_detour,
+            FnSignal,
+            FN_SIGNAL
+        );
+        replace!(
+            &mut hook_manager,
+            "sigaction",
+            sigaction_detour,
+            FnSigaction,
+            FN_SIGACTION
+        );
+        replace!(&mut hook_manager, "_exit", _exit_detour, Fn_exit, FN__EXIT);
         replace!(&mut hook_manager, "close", close_detour, FnClose, FN_CLOSE);
         replace!(
             &mut hook_manager,
@@ -955,6 +990,34 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     let res = FN_CLOSE(fd);
     close_layer_fd(fd);
     res
+}
+
+#[hook_fn]
+pub(crate) unsafe extern "C" fn _exit_detour(status: c_int) {
+    debug!("here1");
+    FN__EXIT(status)
+}
+
+#[hook_fn]
+pub(crate) unsafe extern "C" fn exit_detour(status: c_int) {
+    debug!("here2");
+    FN_EXIT(status)
+}
+
+#[hook_fn]
+pub(crate) unsafe extern "C" fn signal_detour(signal: c_int, handler: libc::size_t) -> c_int {
+    debug!("signal - {signal:?} {handler:?}");
+    FN_SIGNAL(signal, handler)
+}
+
+#[hook_fn]
+pub(crate) unsafe extern "C" fn sigaction_detour(
+    signum: c_int,
+    act: *const libc::sigaction,
+    old_act: *mut libc::sigaction,
+) -> c_int {
+    debug!("sigaction - {signum:?} {act:?} {old_act:?}");
+    FN_SIGACTION(signum, act, old_act)
 }
 
 // TODO(alex) [mid] 2023-01-24: What is this?
