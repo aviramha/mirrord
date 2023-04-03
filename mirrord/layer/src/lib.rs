@@ -72,13 +72,14 @@ extern crate core;
 
 use std::{
     collections::VecDeque,
+    ffi::CString,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     panic,
-    sync::{LazyLock, OnceLock},
+    sync::{Condvar, LazyLock, Mutex, OnceLock},
 };
 
 use common::ResponseChannel;
-use ctor::ctor;
+use ctor::{ctor, dtor};
 use dns::GetAddrInfo;
 use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
@@ -107,10 +108,13 @@ use tcp_steal::TcpStealHandler;
 use tokio::{
     runtime::Runtime,
     select,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Notify,
+    },
     time::{sleep, Duration},
 };
-use tracing::{error, info, trace};
+use tracing::{debug, error, info, trace};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -168,6 +172,12 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
         .build()
         .unwrap()
 });
+
+/// is used by the exit detection to notify the main loop to shutdown.
+static SHUTDOWN_NOTIFY: LazyLock<Notify> = LazyLock::new(Notify::new);
+
+/// is used to wait for the main loop to shutdown after signaling.
+static LAYER_RUNNING: (Condvar, Mutex<bool>) = (Condvar::new(), Mutex::new(false));
 
 /// [`Sender`] for the [`HookMessage`]s that are handled internally, and converted (when applicable)
 /// to [`ClientMessage`]s.
@@ -309,6 +319,28 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
     }
 
     Ok(())
+}
+
+/// Tracing doesn't work here for some reason. (`debug!`, `trace!`, etc.)
+#[dtor]
+fn mirrord_layer_exit() {
+    let msg = CString::new("dtor\n").unwrap();
+    unsafe {
+        libc::printf(msg.as_ptr() as *const libc::c_char);
+    }
+    SHUTDOWN_NOTIFY.notify_waiters();
+    let lock = LAYER_RUNNING
+        .1
+        .lock()
+        .expect("acquiring lock failed, please report this bug");
+    // Only wait for 1 second before exiting
+    if *lock {
+        let _ = LAYER_RUNNING.0.wait_timeout(lock, Duration::from_secs(1));
+    }
+    debug!("exit?");
+    unsafe {
+        libc::printf(msg.as_ptr() as *const libc::c_char);
+    }
 }
 
 /// The one true start of mirrord-layer.
@@ -720,6 +752,10 @@ async fn thread_loop(
         ..
     } = config;
     let mut layer = Layer::new(tx, rx, incoming);
+    // hold mutex only for the statement
+    {
+        *LAYER_RUNNING.1.lock().unwrap() = true;
+    }
     loop {
         select! {
             hook_message = receiver.recv() => {
@@ -768,6 +804,10 @@ async fn thread_loop(
             }
             Some(response) = layer.http_response_receiver.recv() => {
                 layer.send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(response))).await.unwrap();
+            },
+            _ = SHUTDOWN_NOTIFY.notified() => {
+                debug!("Shutdown signal received, exiting");
+                return;
             }
             _ = sleep(Duration::from_secs(60)) => {
                 if !layer.ping {
@@ -780,10 +820,11 @@ async fn thread_loop(
             }
         }
     }
-
+    debug!("here");
     if capture_error_trace {
         tracing_util::print_support_message();
     }
+    debug!("here2");
     graceful_exit!("mirrord has encountered an error and is now exiting.");
 }
 
@@ -795,7 +836,15 @@ async fn start_layer_thread(
     receiver: Receiver<HookMessage>,
     config: LayerConfig,
 ) {
-    tokio::spawn(thread_loop(receiver, tx, rx, config));
+    tokio::spawn(async {
+        thread_loop(receiver, tx, rx, config).await;
+        *LAYER_RUNNING
+            .1
+            .lock()
+            .expect("failed acquiring lock, report this bug") = false;
+        LAYER_RUNNING.0.notify_one();
+        debug!("bye");
+    });
 }
 
 /// Prepares the [`HookManager`] and [`replace!`]s [`libc`] calls with our hooks, according to what
@@ -878,7 +927,6 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
 ///
 /// Removes the `fd` key from either [`SOCKETS`] or [`OPEN_FILES`].
 pub(crate) fn close_layer_fd(fd: c_int) {
-    trace!("Closing fd {}", fd);
     let file_mode_active = FILE_MODE
         .get()
         .expect("Should be set during initialization!")
