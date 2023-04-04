@@ -66,14 +66,17 @@ async fn connection_task(
                     },
                     Some(Err(ref error)) if error.kind() == ErrorKind::ConnectionReset => {
                         trace!("layer connection reset");
+                        agent_sender.send(ClientMessage::Close).await;
                         break;
                     },
                     Some(Err(fail)) => {
                         error!("Error receiving layer message: {fail:#?}");
+                        agent_sender.send(ClientMessage::Close).await;
                         break;
                     },
                     None => {
                         trace!("layer connection closed");
+                        agent_sender.send(ClientMessage::Close).await;
                         break;
                     }
                 }
