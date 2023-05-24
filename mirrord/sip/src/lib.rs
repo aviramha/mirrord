@@ -205,6 +205,16 @@ mod main {
             .get(binary_info.offset..binary_info.offset + binary_info.size)
             .expect("invalid SIP binary");
         std::fs::write(output.as_ref(), binary)?;
+
+        std::process::Command::new("install_name_tool")
+            .args(&[
+                "-add_rpath",
+                "/Applications/Postman.app/Contents/MacOS/Frameworks",
+                output.as_ref().to_str().unwrap(),
+            ])
+            .output()
+            .expect("failed to execute process");
+
         // Give the new file the same permissions as the old file.
         std::fs::set_permissions(
             output.as_ref(),

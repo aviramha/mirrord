@@ -11,7 +11,7 @@ use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
 use errno::{set_errno, Errno};
 use libc::{
     self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
-    AT_FDCWD, DIR,
+    AT_FDCWD, DIR, statvfs,
 };
 #[cfg(target_os = "linux")]
 use libc::{EBADF, EINVAL, ENOENT, ENOTDIR};
@@ -562,6 +562,7 @@ unsafe extern "C" fn fill_statfs(out_stat: *mut statfs, metadata: &FsMetadataInt
 /// Hook for `libc::lstat`.
 #[hook_guard_fn]
 unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
+    trace!("cheers");
     if out_stat.is_null() {
         return HookError::BadPointer.into();
     }
@@ -598,6 +599,7 @@ pub(crate) unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> 
 /// Hook for `libc::stat`.
 #[hook_guard_fn]
 unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
+    trace!("hissssss");
     if out_stat.is_null() {
         return HookError::BadPointer.into();
     }
@@ -670,6 +672,7 @@ unsafe extern "C" fn fstatat_detour(
     out_stat: *mut stat,
     flag: c_int,
 ) -> c_int {
+    trace!("i'ma aaa");
     fstatat_logic(fd, raw_path, out_stat, flag).unwrap_or_bypass_with(|_bypass| {
         #[cfg(target_os = "macos")]
         let raw_path = update_ptr_from_bypass(raw_path, _bypass);
@@ -679,6 +682,7 @@ unsafe extern "C" fn fstatat_detour(
 
 #[hook_guard_fn]
 unsafe extern "C" fn fstatfs_detour(fd: c_int, out_stat: *mut statfs) -> c_int {
+    trace!("I'm heres!");
     if out_stat.is_null() {
         return HookError::BadPointer.into();
     }
@@ -690,6 +694,57 @@ unsafe extern "C" fn fstatfs_detour(fd: c_int, out_stat: *mut statfs) -> c_int {
             0
         })
         .unwrap_or_bypass_with(|_| FN_FSTATFS(fd, out_stat))
+}
+
+/// Hook for libc's stat syscall wrapper.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn statfs_detour(
+    raw_path: *const c_char,
+    out_stat: *mut statfs,
+) -> c_int {
+    if out_stat.is_null() {
+        return HookError::BadPointer.into();
+    }
+
+    trace!("I'm here!");
+    FN_STATFS(raw_path, out_stat)
+    // xstat(Some(raw_path.checked_into()), None, true)
+    //     .map(|res| {
+    //         let res = res.metadata;
+    //         fill_stat(out_stat, &res);
+    //         0
+    //     })
+    //     .unwrap_or_bypass_with(|_bypass| {
+    //         #[cfg(target_os = "macos")]
+    //         let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+    //         FN___XSTAT(ver, raw_path, out_stat)
+    //     })
+}
+
+
+/// Hook for libc's stat syscall wrapper.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn statvfs_detour(
+    raw_path: *const c_char,
+    out_stat: *mut statvfs,
+) -> c_int {
+    if out_stat.is_null() {
+        return HookError::BadPointer.into();
+    }
+
+    trace!("I'm here!");
+    FN_STATVFS(raw_path, out_stat)
+    // xstat(Some(raw_path.checked_into()), None, true)
+    //     .map(|res| {
+    //         let res = res.metadata;
+    //         fill_stat(out_stat, &res);
+    //         0
+    //     })
+    //     .unwrap_or_bypass_with(|_bypass| {
+    //         #[cfg(target_os = "macos")]
+    //         let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+    //         FN___XSTAT(ver, raw_path, out_stat)
+    //     })
 }
 
 // this requires newer libc which we don't link with to support old libc..
@@ -817,6 +872,38 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         FnFaccessat,
         FN_FACCESSAT
     );
+
+    replace!(
+        hook_manager,
+        "statvfs",
+        statvfs_detour,
+        FnStatvfs,
+        FN_STATVFS
+    );
+    replace!(
+        hook_manager,
+        "statvfs$INODE64",
+        statvfs_detour,
+        FnStatvfs,
+        FN_STATVFS
+    );
+
+    replace!(
+        hook_manager,
+        "statfs",
+        statfs_detour,
+        FnStatfs,
+        FN_STATFS
+    );
+
+    replace!(
+        hook_manager,
+        "statfs$INODE64",
+        statfs_detour,
+        FnStatfs,
+        FN_STATFS
+    );
+
     // this requires newer libc which we don't link with to support old libc..
     // leaving this in code so we can enable it when libc is updated.
     // #[cfg(target_os = "linux")]
@@ -850,6 +937,9 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FnFstatfs,
             FN_FSTATFS
         );
+
+
+
         replace!(
             hook_manager,
             "fdopendir",
