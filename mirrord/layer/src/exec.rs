@@ -4,13 +4,14 @@ use std::{
     env,
     ffi::{c_void, CString},
     marker::PhantomData,
+    path::{PathBuf, Path},
     ptr,
     sync::OnceLock,
 };
 
 use libc::{c_char, c_int, pid_t};
 use mirrord_layer_macro::hook_guard_fn;
-use mirrord_sip::{sip_patch, SipError, MIRRORD_PATCH_DIR};
+use mirrord_sip::{sip_patch, SipError, MIRRORD_PATCH_DIR, MIRRORD_TEMP_BIN_DIR};
 use null_terminated::Nul;
 use tracing::{trace, warn};
 
@@ -47,6 +48,13 @@ pub(crate) unsafe fn enable_execve_hook(
         posix_spawn_detour,
         FnPosix_spawn,
         FN_POSIX_SPAWN
+    );
+    replace!(
+        hook_manager,
+        "_NSGetExecutablePath",
+        _nsget_executable_path_detour,
+        Fn_nsget_executable_path,
+        FN__NSGET_EXECUTABLE_PATH
     );
 }
 
@@ -137,6 +145,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
             // that we don't just keep going indefinitely if a bad argv was passed.
             return Bypass(TooManyArgs);
         }
+        eprintln!("aaaaaa");
         let arg_str: &str = arg.checked_into()?;
         trace!("exec arg: {arg_str}");
 
@@ -245,4 +254,38 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
         }
         _ => FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp),
     }
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
+    path: *mut c_char,
+    buflen: *mut u32,
+) -> c_int {
+    let res = FN__NSGET_EXECUTABLE_PATH(path, buflen);
+    if let Detour::Success(path_buf) = CheckedInto::<PathBuf>::checked_into(path as *const c_char) {
+        if let Ok(stripped_path) = path_buf.strip_prefix(MIRRORD_TEMP_BIN_DIR.as_str()) {
+            let stripped_path = Path::new("/").join(stripped_path);
+            let path_cstring = CString::new(stripped_path.to_str().unwrap()).unwrap();
+            path.copy_from(path_cstring.as_ptr(), path_cstring.as_bytes().len());
+            eprintln!("patched {path_cstring:?}");
+        }
+    }
+    res
+
+    //     CString::new(arg_str
+    //         .strip_prefix(&tmp_dir)
+    //         .inspect(|original_path| {
+    //             trace!(
+    //                 "Intercepted mirrord's temp dir in argv: {}. Replacing with original path:
+    // {}.",                 arg_str,
+    //                 original_path
+    //             );
+    //         })
+    //         .unwrap_or(arg_str) // No temp-dir prefix found, use arg as is.
+    //         // As the string slice we get here is a slice of memory allocated and managed by
+    //         // the user app, we copy the data and create new CStrings out of the copy
+    //         // without consuming the original data.
+    //         .to_owned()
+    //     )?
+    // )
 }
