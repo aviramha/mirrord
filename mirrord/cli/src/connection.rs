@@ -7,7 +7,7 @@ use mirrord_operator::client::OperatorApi;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::trace;
 
 use crate::{CliError, Result};
 
@@ -30,7 +30,7 @@ pub(crate) async fn connect_operator<P>(
 where
     P: Progress + Send + Sync,
 {
-    let sub_progress = progress.subtask("Checking Operator");
+    let sub_progress = progress.subtask("checking operator");
 
     match OperatorApi::discover(config, progress)
         .await
@@ -38,19 +38,19 @@ where
         .into_diagnostic()
     {
         Ok(Some(connection)) => {
-            sub_progress.done_with("Connected to Operator");
+            sub_progress.done_with("connected to operator");
 
             Some(connection)
         }
         Ok(None) => {
-            sub_progress.done_with("No Operator Detected");
+            sub_progress.done_with("no operator detected");
 
             None
         }
         Err(err) => {
-            sub_progress.fail_with("Unable to connect to Operator");
+            sub_progress.done_with("unable to check if operator exists, probably due to RBAC");
 
-            warn!("{err}");
+            trace!("{err}");
 
             None
         }
@@ -71,7 +71,7 @@ where
             AgentConnection { sender, receiver },
         ))
     } else {
-        if matches!(config.target.path, Some(mirrord_config::target::Target::Deployment{..})) {
+        if matches!(config.target, mirrord_config::target::TargetConfig{ path: Some(mirrord_config::target::Target::Deployment{..}), ..}) {
             // progress.subtask("text").done_with("text");
             eprintln!("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.\n \
                       Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.\n \

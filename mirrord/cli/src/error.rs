@@ -102,11 +102,11 @@ pub(crate) enum CliError {
         "This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"
     ))]
     InvalidMessage(String),
-    #[error("Timeout waiting for remote environment variables.")]
+    #[error("Initial communication with the agent failed. {0:#?}")]
     #[diagnostic(help(
         "Please make sure the agent is running and the logs are not showing any errors.{GENERAL_HELP}"
     ))]
-    GetEnvironmentTimeout,
+    InitialCommFailed(&'static str),
     #[error("Failed to execute binary `{0:#?}` with args `{1:#?}`")]
     #[diagnostic(help(
         r#"
@@ -198,4 +198,15 @@ pub(crate) enum CliError {
     #[error("Waitlist registration failed.")]
     #[diagnostic(help("Please check the email provided and internet connection.{GENERAL_HELP}"))]
     WaitlistError(reqwest::Error),
+    #[error("{0} is not compatible with a targetless agent, please either disable this option or specify a target.")]
+    IncompatibleWithTargetless(String),
+    #[error(
+        "A target namespace was specified, but no target was specified. If you want to set the \
+        namespace in which the agent will be created, please set the agent namespace, not the \
+        target namespace. That value can be set with agent.namespace in the configuration file, \
+        the -a argument of the CLI, or the MIRRORD_AGENT_NAMESPACE environment variable.
+
+        If you are not trying to run targetless, please specify a target instead."
+    )]
+    TargetNamespaceWithoutTarget,
 }

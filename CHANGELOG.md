@@ -8,6 +8,204 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.45.0](https://github.com/metalbear-co/mirrord/tree/3.45.0) - 2023-06-05
+
+
+### Added
+
+- Rider is now supported by the IntelliJ plugin.
+  [#1012](https://github.com/metalbear-co/mirrord/issues/1012)
+
+
+### Fixed
+
+- Chagned agent to not return errors on reading from outgoing sockets, and
+  layer to not crash in that case anyway
+
+
+### Internal
+
+- Use one thread for namespaced runtimes
+  [#1287](https://github.com/metalbear-co/mirrord/issues/1287)
+- Better timeformatting in e2e and maybe reduce flakiness?
+- Fix nodejs deprecation warnings in CI
+- Set MIRRORD_AGENT_IMAGE for vscode e2e
+
+
+## [3.44.2](https://github.com/metalbear-co/mirrord/tree/3.44.2) - 2023-06-01
+
+
+### Changed
+
+- Change phrasing on version mismatch warning.
+- Add `/Volumes` to default local on macOS
+- Change Ping interval from 60s down to 30s.
+- Changed local read defaults - list now includes `^/sbin(/|$)` and
+  `^/var/run/com.apple`.
+
+
+### Fixed
+
+- Running postman with mirrord works.
+  [#1445](https://github.com/metalbear-co/mirrord/issues/1445)
+- Return valid error code when dns lookup fails, instead of -1.
+
+
+### Internal
+
+- Add E2E tests for vscode extension
+  [#201](https://github.com/metalbear-co/mirrord/issues/201)
+- Fixed flaky integration tests.
+  [#1452](https://github.com/metalbear-co/mirrord/issues/1452)
+- Fixed e2e tests' flakiness in the CI.
+  [#1453](https://github.com/metalbear-co/mirrord/issues/1453)
+- Change CI log level to be debug instead of trace
+- Hooking `_NSGetExecutablePath` on macOS to strip the `mirrord-bin` temp dir
+  off the path.
+- Introduce a tool to extract config docs into a markdown file. Update docs to
+  match whats in mirrord-dev.
+- On macOS, if we path a binary for SIP and it is in a path that is inside a
+  directory that has a name that ends with `.app`, we add the frameworks
+  directory to `DYLD_FALLBACK_FRAMEWORK_PATH`.
+- Provide buffer for `IndexAllocator` to avoid re-use of indices too fast
+
+
+## [3.44.1](https://github.com/metalbear-co/mirrord/tree/3.44.1) - 2023-05-26
+
+
+### Changed
+
+- Never importing `RUST_LOG` environment variable from the cluster, regardless
+  of configuration.
+
+
+### Fixed
+
+- Provide helpful error messages on errors in IDEs.
+  [#1392](https://github.com/metalbear-co/mirrord/issues/1392)
+- Log level control when running targetless.
+  [#1446](https://github.com/metalbear-co/mirrord/issues/1446)
+- Change to sticky balloon on warnings in intelliJ
+  [#1456](https://github.com/metalbear-co/mirrord/issues/1456)
+- Setting the namespace via the configuration was not possible in the IDE
+  without also setting a target in the configuration file.
+  [#1461](https://github.com/metalbear-co/mirrord/issues/1461)
+- fixed IntelliJ failing silently when error happened on listing pods
+
+
+### Internal
+
+- Fix the test of reading from the SIP patch dir, that was not testing
+  anything.
+- Make the path field of `TargetConfig` an `Option`.
+
+
+## [3.44.0](https://github.com/metalbear-co/mirrord/tree/3.44.0) - 2023-05-24
+
+
+### Added
+
+- Changed agent's pause feature. Now the pause is requested dynamically by CLI
+  during setup and the agent keeps the target container paused until exit or
+  the unpause request was received.
+  [#1408](https://github.com/metalbear-co/mirrord/issues/1408)
+- Added support for NPM run configuration on JetBrains products.
+  [#1418](https://github.com/metalbear-co/mirrord/issues/1418)
+
+
+### Changed
+
+- Change mirrord ls to show only pods that are in running state (not
+  crashing,starting,etc)
+  [#1436](https://github.com/metalbear-co/mirrord/issues/1436)
+- Change fs mode to be local with overrides when targetless is used
+- Make progress text consitently lowercase.
+
+
+### Fixed
+
+- Fix misalignment on IntelliJ not accepting complex path in target
+  [#1441](https://github.com/metalbear-co/mirrord/issues/1441)
+- Add impersonate permissions for GCP specific RBAC in operator
+
+
+### Internal
+
+- Fix node spawn test flakiness on macOS
+  [#1431](https://github.com/metalbear-co/mirrord/issues/1431)
+
+
+## [3.43.0](https://github.com/metalbear-co/mirrord/tree/3.43.0) - 2023-05-22
+
+
+### Added
+
+- Support for targetless execution: when not specifying any target for the
+  agent, mirrord now spins up an independent agent. This can be useful e.g. if
+  you are just interested in getting the cluster's DNS resolution and outgoing
+  connectivity but don't want any pod's incoming traffic or FS.
+  [#574](https://github.com/metalbear-co/mirrord/issues/574)
+- Support for targetless mode in IntelliJ based IDEs.
+  [#1375](https://github.com/metalbear-co/mirrord/issues/1375)
+- Support for targetless mode in vscode.
+  [#1376](https://github.com/metalbear-co/mirrord/issues/1376)
+
+
+### Changed
+
+- If a user application tries to read paths inside mirrord's temp dir, we hook
+  that and read the path outside instead.
+  [#1403](https://github.com/metalbear-co/mirrord/issues/1403)
+- Don't print error if we fail checking for operator
+
+
+### Fixed
+
+- Added better detection for protected binaries, fixes not loading into Go
+  binary [#1397](https://github.com/metalbear-co/mirrord/issues/1397)
+- Disallow binding on the same address:port twice. Solves part of issue 1123.
+  [#1123](https://github.com/metalbear-co/mirrord/issues/1123)
+- Fix the lost update bug with config dropdown for intelliJ
+  Fix the lost update bug with config dropdown for intelliJ.
+  [#1420](https://github.com/metalbear-co/mirrord/issues/1420)
+- Fix intelliJ compatability issue by implementing missing
+  createPopupActionGroup
+
+
+### Internal
+
+- Run IntelliJ Plugin Verifier on CI
+  [#1417](https://github.com/metalbear-co/mirrord/issues/1417)
+- Remove bors.toml since we use GH merge queue now
+- Upgrade k8s dependencies and rustls, remove ugly feature ip patch
+
+
+## [3.42.0](https://github.com/metalbear-co/mirrord/tree/3.42.0) - 2023-05-15
+
+
+### Added
+
+- mirrord config dropdown for intelliJ.
+  [#1030](https://github.com/metalbear-co/mirrord/issues/1030)
+- Log agent version when initializing the agent.
+
+
+### Changed
+
+- Remove quotes in InvalidTarget' target error message
+
+
+### Fixed
+
+- Use ProgressManager for mirrord progress on intelliJ
+  [#1337](https://github.com/metalbear-co/mirrord/issues/1337)
+- Fixed `go run` failing because of reading remote files by maing paths under
+  /private and /var/folders read locally by default.
+  [#1397](https://github.com/metalbear-co/mirrord/issues/1397)
+- Fix not loading into Go because of SIP by adding into default patched
+  binaries
+
+
 ## [3.41.1](https://github.com/metalbear-co/mirrord/tree/3.41.1) - 2023-05-07
 
 

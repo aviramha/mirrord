@@ -88,10 +88,14 @@ use file::{filter::FileFilter, OPEN_FILES};
 use hooks::HookManager;
 use libc::c_int;
 use mirrord_config::{
-    feature::FeatureConfig,
-    fs::FsConfig,
-    incoming::{http_filter::HttpHeaderFilterConfig, IncomingConfig},
-    network::NetworkConfig,
+    feature::{
+        fs::{FsConfig, FsModeConfig},
+        network::{
+            incoming::{http_filter::HttpHeaderFilterConfig, IncomingConfig},
+            NetworkConfig,
+        },
+        FeatureConfig,
+    },
     util::VecOrSingle,
     LayerConfig,
 };
@@ -231,6 +235,10 @@ pub(crate) static OUTGOING_IGNORE_LOCALHOST: OnceLock<bool> = OnceLock::new();
 ///
 /// When true, localhost connections will stay local - wont mirror or steal.
 pub(crate) static INCOMING_IGNORE_LOCALHOST: OnceLock<bool> = OnceLock::new();
+
+/// Indicates this is a targetless run, so that users can be warned if their application is
+/// mirroring/stealing from a targetless agent.
+pub(crate) static TARGETLESS: OnceLock<bool> = OnceLock::new();
 
 /// Ports to ignore on listening for mirroring/stealing.
 pub(crate) static INCOMING_IGNORE_PORTS: OnceLock<HashSet<u16>> = OnceLock::new();
@@ -426,11 +434,22 @@ fn layer_start(config: LayerConfig) {
         .set(config.feature.network.incoming.ignore_localhost)
         .expect("Setting INCOMING_IGNORE_LOCALHOST singleton");
 
+    let targetless = config.target.path.is_none();
+    TARGETLESS
+        .set(targetless)
+        .expect("Setting TARGETLESS singleton");
+
     INCOMING_IGNORE_PORTS
         .set(config.feature.network.incoming.ignore_ports.clone())
         .expect("Setting INCOMING_IGNORE_PORTS failed");
 
-    FILE_FILTER.get_or_init(|| FileFilter::new(config.feature.fs.clone()));
+    FILE_FILTER.get_or_init(|| {
+        let mut fs_config = config.feature.fs.clone();
+        if targetless {
+            fs_config.mode = FsModeConfig::LocalWithOverrides;
+        }
+        FileFilter::new(fs_config)
+    });
 
     DEBUGGER_IGNORED_PORTS
         .set(DebuggerPorts::from_env())
@@ -625,7 +644,7 @@ impl Layer {
     /// This message has no dedicated handler, and is thus handled directly here, changing the
     /// [`Self::ping`] state.
     ///
-    /// ### [`DaemonMessage::GetEnvVarsResponse`]
+    /// ### [`DaemonMessage::GetEnvVarsResponse`] and [`DaemonMessage::PauseTarget`]
     ///
     /// Handled during mirrord-layer initialization, this message should never make it this far.
     ///
@@ -637,7 +656,7 @@ impl Layer {
     ///
     /// ### [`DaemonMessage::LogMessage`]
     ///
-    /// This message has no dedicated handler, the internal message is simply logged here.
+    /// This message is handled in protocol level `wrap_raw_connection`.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_daemon_message(&mut self, daemon_message: DaemonMessage) -> Result<()> {
         match daemon_message {
@@ -678,9 +697,9 @@ impl Layer {
                 .send(get_addr_info.0)
                 .map_err(|_| LayerError::SendErrorGetAddrInfoResponse),
             DaemonMessage::Close(error_message) => Err(LayerError::AgentErrorClosed(error_message)),
-            DaemonMessage::LogMessage(_) => {
-                // handled in protocol level `wrap_raw_connection`
-                Ok(())
+            DaemonMessage::LogMessage(_) => Ok(()),
+            DaemonMessage::PauseTarget(_) => {
+                unreachable!("We set pausing target only on initialization, shouldn't happen")
             }
         }
     }
@@ -777,7 +796,7 @@ async fn thread_loop(
             Some(response) = layer.http_response_receiver.recv() => {
                 layer.send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(response))).await.unwrap();
             }
-            _ = sleep(Duration::from_secs(60)) => {
+            _ = sleep(Duration::from_secs(30)) => {
                 if !layer.ping {
                     layer.send(ClientMessage::Ping).await.unwrap();
                     trace!("sent ping to daemon");

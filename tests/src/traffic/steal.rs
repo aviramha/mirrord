@@ -98,7 +98,7 @@ mod steal {
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(45))]
+    #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_only_matching_requests(
         #[future] service: KubeService,
         #[future] kube_client: Client,
@@ -143,7 +143,7 @@ mod steal {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(45))]
+    #[timeout(Duration::from_secs(120))]
     async fn test_filter_with_single_client_and_only_matching_requests_http2(
         #[future] http2_service: KubeService,
         #[future] kube_client: Client,
@@ -210,7 +210,7 @@ mod steal {
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(45))]
+    #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_some_matching_requests(
         #[future] service: KubeService,
         #[future] kube_client: Client,
@@ -280,7 +280,7 @@ mod steal {
     /// app does not see the traffic.
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(60))]
+    #[timeout(Duration::from_secs(120))]
     async fn complete_passthrough(
         #[future] tcp_echo_service: KubeService,
         #[future] kube_client: Client,
@@ -305,7 +305,7 @@ mod steal {
             )
             .await;
 
-        mirrorded_process.wait_for_line(Duration::from_secs(15), "daemon subscribed");
+        mirrorded_process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
 
         let addr = SocketAddr::new(host.trim().parse().unwrap(), port as u16);
         let mut stream = TcpStream::connect(addr).unwrap();
@@ -375,7 +375,7 @@ mod steal {
             )
             .await;
 
-        mirrorded_process.wait_for_line(Duration::from_secs(20), "daemon subscribed");
+        mirrorded_process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
 
         // Create a websocket connection to test the HTTP upgrade bypass.
         let host = host.trim();

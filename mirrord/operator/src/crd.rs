@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::license::License;
 
+pub const TARGETLESS_TARGET_NAME: &str = "targetless";
+
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
@@ -14,7 +16,8 @@ use crate::license::License;
     namespaced
 )]
 pub struct TargetSpec {
-    pub target: Target,
+    /// None when targetless.
+    pub target: Option<Target>,
 }
 
 impl TargetCrd {
@@ -25,30 +28,28 @@ impl TargetCrd {
         }
     }
 
-    pub fn name(&self) -> String {
-        Self::target_name(&self.spec.target)
+    /// "targetless" ([`TARGETLESS_TARGET_NAME`]) if `None`,
+    /// else <resource_type>.<resource_name>...
+    pub fn target_name_by_config(target_config: &TargetConfig) -> String {
+        target_config
+            .path
+            .as_ref()
+            .map_or_else(|| TARGETLESS_TARGET_NAME.to_string(), Self::target_name)
     }
 
-    pub fn from_target(target_config: TargetConfig) -> Option<Self> {
-        let target = target_config.path?;
-
-        let target_name = match &target {
-            Target::Deployment(target) => format!("deploy.{}", target.deployment),
-            Target::Pod(target) => format!("pod.{}", target.pod),
-        };
-
-        let mut crd = TargetCrd::new(&target_name, TargetSpec { target });
-
-        crd.metadata.namespace = target_config.namespace;
-
-        Some(crd)
+    pub fn name(&self) -> String {
+        self.spec
+            .target
+            .as_ref()
+            .map(Self::target_name)
+            .unwrap_or(TARGETLESS_TARGET_NAME.to_string())
     }
 }
 
 impl From<TargetCrd> for TargetConfig {
     fn from(crd: TargetCrd) -> Self {
         TargetConfig {
-            path: Some(crd.spec.target),
+            path: crd.spec.target,
             namespace: crd.metadata.namespace,
         }
     }

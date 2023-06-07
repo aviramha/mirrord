@@ -1,6 +1,8 @@
 import org.jetbrains.changelog.markdownToHTML
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import org.jetbrains.intellij.tasks.RunPluginVerifierTask.FailureLevel
 import java.nio.file.Paths
+import java.util.EnumSet
 
 fun properties(key: String) = project.findProperty(key).toString()
 
@@ -28,7 +30,7 @@ dependencies {
     implementation(project(":mirrord-products-rubymine"))
     implementation(project(":mirrord-products-goland"))
     implementation(project(":mirrord-products-nodejs"))
-
+    implementation(project(":mirrord-products-rider"))
 }
 
 // Configure Gradle IntelliJ Plugin - read more: https://github.com/JetBrains/gradle-intellij-plugin
@@ -42,7 +44,7 @@ intellij {
     }
 
     // Plugin Dependencies. Uses `platformPlugins` property from the gradle.properties file.
-    if (platformType != "PY" && platformType != "PC" && platformType != "GO") {
+    if (platformType != "PY" && platformType != "PC" && platformType != "GO" && platformType != "RD") {
         plugins.set(
                 properties("platformPlugins")
                         .split(',')
@@ -178,5 +180,10 @@ tasks {
         // https://plugins.jetbrains.com/docs/intellij/deployment.html#specifying-a-release-channel
         channels.set(listOf("beta"))
         channels.set(listOf(properties("pluginVersion").split('-').getOrElse(1) { "default" }.split('.').first()))
+    }
+
+    runPluginVerifier {
+        ideVersions.set(listOf("IU-232.5150.116", "IU-222.4554.10"))
+        failureLevel.set(EnumSet.of(FailureLevel.COMPATIBILITY_PROBLEMS, FailureLevel.INVALID_PLUGIN))
     }
 }

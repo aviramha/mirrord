@@ -1,4 +1,4 @@
-use std::{env::VarError, ptr, str::ParseBoolError};
+use std::{env::VarError, net::SocketAddr, ptr, str::ParseBoolError};
 
 use errno::set_errno;
 use ignore_codes::*;
@@ -93,6 +93,9 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: Pointer argument points to an invalid address")]
     BadPointer,
+
+    #[error("mirrord-layer: Socket address `{0}` is already bound!")]
+    AddressAlreadyBound(SocketAddr),
 }
 
 /// Errors internal to mirrord-layer.
@@ -260,10 +263,13 @@ impl From<HookError> for i64 {
                     mirrord_protocol::RemoteError::ConnectTimedOut(_) => libc::ENETUNREACH,
                     _ => libc::EINVAL,
                 },
-                ResponseError::DnsLookup(dns_fail) => match dns_fail.kind {
-                    mirrord_protocol::ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
-                    _ => libc::EAI_FAIL,
-                },
+                ResponseError::DnsLookup(dns_fail) => {
+                    return match dns_fail.kind {
+                        mirrord_protocol::ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
+                        _ => libc::EAI_FAIL,
+                        // TODO: Add more error kinds, next time we break protocol compatibility.
+                    } as _;
+                }
                 // for listen, EINVAL means "socket is already connected."
                 // Will not happen, because this ResponseError is not return from any hook, so it
                 // never appears as HookError::ResponseError(PortAlreadyStolen(_)).
@@ -280,6 +286,7 @@ impl From<HookError> for i64 {
             HookError::SocketUnsuportedIpv6 => libc::EAFNOSUPPORT,
             HookError::UnsupportedSocketType => libc::EAFNOSUPPORT,
             HookError::BadPointer => libc::EFAULT,
+            HookError::AddressAlreadyBound(_) => libc::EADDRINUSE,
         };
 
         set_errno(errno::Errno(libc_error));
