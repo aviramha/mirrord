@@ -8,7 +8,7 @@ use thiserror::Error;
 use crate::{
     config::{
         from_env::FromEnv, source::MirrordConfigSource, unstable::Unstable, ConfigError,
-        FromMirrordConfig, MirrordConfig, Result,
+        FromMirrordConfig, MirrordConfig, Result, self,
     },
     util::{MirrordToggleableConfig, ToggleableConfig},
 };
@@ -160,6 +160,14 @@ pub struct IncomingAdvancedFileConfig {
     /// See [`filter`](##filter) for details.
     pub http_header_filter: Option<ToggleableConfig<http_filter::HttpHeaderFilterFileConfig>>,
 
+    /// ### HTTP Filter
+    ///
+    /// Sets up the HTTP traffic filter (currently, only useful when `incoming: steal`).
+    ///
+    /// See [`filter`](##filter) for details.
+    pub http_filter: Option<ToggleableConfig<http_filter::HttpFilterFileConfig>>,
+
+
     /// ### port_mapping
     ///
     /// Mapping for local ports to remote ports.
@@ -256,6 +264,9 @@ pub struct IncomingConfig {
 
     /// #### feature.network.incoming.filter {#feature-network-incoming-filter}
     pub http_header_filter: HttpHeaderFilterConfig,
+
+    /// #### feature.network.incoming.filter {#feature-network-incoming-filter}
+    pub http_filter: HttpFilterConfig,
 }
 
 impl IncomingConfig {
