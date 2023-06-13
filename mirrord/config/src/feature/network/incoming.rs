@@ -8,7 +8,7 @@ use thiserror::Error;
 use crate::{
     config::{
         from_env::FromEnv, source::MirrordConfigSource, unstable::Unstable, ConfigError,
-        FromMirrordConfig, MirrordConfig, Result, self,
+        FromMirrordConfig, MirrordConfig, Result,
     },
     util::{MirrordToggleableConfig, ToggleableConfig},
 };
@@ -106,6 +106,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .http_header_filter
                     .unwrap_or_default()
                     .generate_config()?,
+                http_filter: advanced.http_filter.unwrap_or_default().generate_config()?,
                 port_mapping: advanced
                     .port_mapping
                     .map(|m| m.into_iter().collect())
@@ -166,7 +167,6 @@ pub struct IncomingAdvancedFileConfig {
     ///
     /// See [`filter`](##filter) for details.
     pub http_filter: Option<ToggleableConfig<http_filter::HttpFilterFileConfig>>,
-
 
     /// ### port_mapping
     ///
@@ -265,7 +265,7 @@ pub struct IncomingConfig {
     /// #### feature.network.incoming.filter {#feature-network-incoming-filter}
     pub http_header_filter: HttpHeaderFilterConfig,
 
-    /// #### feature.network.incoming.filter {#feature-network-incoming-filter}
+    /// #### feature.network.incoming.filter {#feature-network-incoming-http-filter}
     pub http_filter: HttpFilterConfig,
 }
 

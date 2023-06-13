@@ -12,6 +12,7 @@ use crate::{
 // TODO(alex) [high] 2023-05-18: Wrong example (incomplete) here and in the oficial docs.
 /// Filter configuration for the HTTP traffic stealer feature.
 ///
+/// DEPRECATED - USE http_filter instead, unless using old operator/agent version (pre 3.46.0)
 /// Allows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic
 /// feature only captures HTTP requests that match the specified filter, forwarding unmatched
 /// requests to their original destinations.
@@ -31,8 +32,6 @@ use crate::{
 pub struct HttpHeaderFilterConfig {
     /// ##### feature.network.incoming.http_header_filter.filter {#feature-network-incoming-http_header_filter-filter}
     ///
-    /// DEPRECATED - USE http_filter instead, unless using old operator/agent version (pre 3.46.0)
-    /// Used to match against the requests captured by the mirrord-agent pod.
     ///
     /// Supports regexes validated by the
     /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
@@ -52,7 +51,6 @@ pub struct HttpHeaderFilterConfig {
     pub ports: PortList,
 }
 
-
 /// Filter configuration for the HTTP traffic stealer feature.
 ///
 /// Allows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic
@@ -69,21 +67,27 @@ pub struct HttpHeaderFilterConfig {
 /// }
 /// ```
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
-#[config(map_to = "HttpHeaderFilterFileConfig", derive = "JsonSchema")]
+#[config(map_to = "HttpFilterFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
-pub struct HttpHeaderFilterConfig {
-    /// ##### feature.network.incoming.http_header_filter.filter {#feature-network-incoming-http_header_filter-filter}
+pub struct HttpFilterConfig {
+    /// ##### feature.network.incoming.http_filter.header_filter {#feature-network-incoming-http-header-filter}
     ///
-    /// DEPRECATED - USE http_filter instead, unless using old operator/agent version (pre 3.46.0)
-    /// Used to match against the requests captured by the mirrord-agent pod.
     ///
     /// Supports regexes validated by the
     /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
     ///
     /// The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
     /// case-insensitive.
-    #[config(env = "MIRRORD_HTTP_HEADER_FILTER")]
-    pub filter: Option<String>,
+    pub header_filter: Option<String>,
+
+    /// ##### feature.network.incoming.http_filter.path_filter {#feature-network-incoming-http-path-filter}
+    ///
+    ///
+    /// Supports regexes validated by the
+    /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
+    ///
+    /// Case insensitive.
+    pub path_filter: Option<String>,
 
     /// ##### feature.network.incoming.http_header_filter.ports {#feature-network-incoming-http_header_filter-ports}
     ///
@@ -91,7 +95,7 @@ pub struct HttpHeaderFilterConfig {
     ///
     /// Other ports will still be stolen (when `"steal`" is being used), they're just not checked
     /// for HTTP filtering.
-    #[config(env = "MIRRORD_HTTP_HEADER_FILTER_PORTS", default)]
+    #[config(default)]
     pub ports: PortList,
 }
 
@@ -117,6 +121,12 @@ impl MirrordToggleableConfig for HttpHeaderFilterFileConfig {
             .unwrap_or_default();
 
         Ok(Self::Generated { filter, ports })
+    }
+}
+
+impl MirrordToggleableConfig for HttpFilterFileConfig {
+    fn disabled_config() -> Result<Self::Generated, ConfigError> {
+        Ok(HttpFilterConfig::default())
     }
 }
 

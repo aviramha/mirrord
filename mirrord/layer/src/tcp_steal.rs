@@ -103,7 +103,10 @@ pub struct TcpStealHandler {
     http_response_sender: Sender<HttpResponse>,
 
     /// A string with a header regex to filter HTTP requests by.
-    http_filter: Option<String>,
+    http_header_filter: Option<String>,
+
+    /// A string with a path regex to filter HTTP requests by.
+    http_path_filter: Option<String>,
 
     /// These ports would be filtered with the `http_filter`, if it's Some.
     http_ports: Vec<u16>,
@@ -228,7 +231,7 @@ impl TcpHandler for TcpStealHandler {
             return Ok(());
         }
 
-        let steal_type = if self.http_ports.contains(&original_port) && let Some(filter_str) = self.http_filter.take() {
+        let steal_type = if self.http_ports.contains(&original_port) && let Some(filter_str) = self.http_header_filter.take() {
             FilteredHttp(request_port, Filter::new(filter_str)?)
         } else {
             All(request_port)
@@ -244,7 +247,7 @@ impl TcpHandler for TcpStealHandler {
 
 impl TcpStealHandler {
     pub(crate) fn new(
-        http_filter: Option<String>,
+        http_header_filter: Option<String>,
         http_ports: Vec<u16>,
         http_response_sender: Sender<HttpResponse>,
         port_mapping: BiMap<u16, u16>,
@@ -254,8 +257,9 @@ impl TcpStealHandler {
             write_streams: Default::default(),
             read_streams: Default::default(),
             http_request_senders: Default::default(),
+            http_path_filter: Default::default(),
             http_response_sender,
-            http_filter,
+            http_header_filter,
             http_ports,
             port_mapping,
         }
