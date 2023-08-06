@@ -325,7 +325,7 @@ jobs:
       - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
       - uses: actions/setup-go@v3
         with:
-          go-version: "1.20.0-rc.3"
+          go-version: "1.20.7"
       - run: |
           go version
       - run: | # Build Go test apps.
@@ -407,7 +407,7 @@ jobs:
           ./scripts/build_go_apps.sh 19
       - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
-          go-version: "1.20.0-rc.3"
+          go-version: "1.20.7"
       - run: |
           go version
       - run: | # Build Go test apps.
