@@ -82,7 +82,6 @@ async fn mirroring_with_http(
 }
 
 /// Run the http mirroring test only on MacOS, because of a known crash on Linux.
-#[cfg(target_os = "macos")]
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
