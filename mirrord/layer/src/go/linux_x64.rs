@@ -1,7 +1,7 @@
 use std::arch::asm;
 
 use errno::errno;
-use tracing::trace;
+use tracing::{trace, debug};
 
 use crate::{
     close_detour, file::hooks::*, hooks::HookManager, macros::hook_symbol, socket::hooks::*,
@@ -648,9 +648,11 @@ fn post_go1_19(hook_manager: &mut HookManager) {
 ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
 ///   - <https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go>
 pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
+    debug!("here");
     if let Some(version_symbol) =
         hook_manager.resolve_symbol_main_module("runtime.buildVersion.str")
     {
+        debug!("here2");
         // Version str is `go1.xx` - take only last 4 characters.
         let version = unsafe {
             std::str::from_utf8_unchecked(std::slice::from_raw_parts(
@@ -658,7 +660,9 @@ pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
                 4,
             ))
         };
+        debug!("here3 {:?}", version);
         let version_parsed: f32 = version.parse().unwrap();
+        debug!("here4 {:?}", version_parsed);
         if version_parsed >= 1.19 {
             trace!("found version >= 1.19");
             post_go1_19(hook_manager);

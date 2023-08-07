@@ -1,7 +1,7 @@
 use std::{ptr::null_mut, sync::LazyLock};
 
 use frida_gum::{interceptor::Interceptor, Gum, Module, NativePointer};
-use tracing::trace;
+use tracing::{trace, debug};
 
 use crate::{LayerError, Result};
 
@@ -18,7 +18,9 @@ pub(crate) struct HookManager<'a> {
 fn get_modules() -> Vec<String> {
     Module::enumerate_modules()
         .iter()
-        .map(|m| m.name.clone())
+        .map(|m| {
+            debug!("module {:?}", m.name);
+            m.name.clone()})
         .collect()
 }
 
