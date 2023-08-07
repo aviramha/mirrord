@@ -112,6 +112,9 @@ impl<'a> HookManager<'a> {
     pub(crate) fn resolve_symbol_main_module(&self, symbol: &str) -> Option<NativePointer> {
         // This can't fail
         let module = self.modules.first().unwrap().clone();
+        for symbol in Module::enumerate_symbols(&module) {
+            debug!("found symbol {:?}", symbol.name);
+        }
         Module::find_symbol_by_name(&module, symbol)
     }
 }
