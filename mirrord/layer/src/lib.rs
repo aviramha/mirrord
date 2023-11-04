@@ -67,7 +67,13 @@
 extern crate alloc;
 extern crate core;
 
-use std::{cmp::Ordering, ffi::OsString, panic, sync::OnceLock, time::Duration};
+use std::{
+    cmp::Ordering,
+    ffi::OsString,
+    panic,
+    sync::{OnceLock, RwLock},
+    time::Duration,
+};
 
 use ctor::ctor;
 use error::{LayerError, Result};
@@ -130,7 +136,7 @@ const TRACE_ONLY_ENV: &str = "MIRRORD_LAYER_TRACE_ONLY";
 /// Global connection to the internal proxy.
 /// Should not be used directly. Use [`common::make_proxy_request_with_response`] or
 /// [`common::make_proxy_request_no_response`] functions instead.
-static mut PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
+static PROXY_CONNECTION: RwLock<Option<ProxyConnection>> = RwLock::new(None);
 
 static SETUP: OnceLock<LayerSetup> = OnceLock::new();
 
@@ -310,16 +316,16 @@ fn layer_start(mut config: LayerConfig) {
         return;
     }
 
-    unsafe {
-        if PROXY_CONNECTION.get().is_none() {
-            let address = setup().proxy_address();
-            let new_connection =
-                ProxyConnection::new(address, NewSessionRequest::New, Duration::from_secs(5))
-                    .expect("failed to initialize proxy connection");
-            PROXY_CONNECTION
-                .set(new_connection)
-                .expect("setting PROXY_CONNECTION singleton")
-        }
+    let mut proxy_connection = PROXY_CONNECTION
+        .write()
+        .expect("PROXY_CONNECTION write lock failed");
+
+    if proxy_connection.is_none() {
+        let address = setup().proxy_address();
+        let new_connection =
+            ProxyConnection::new(address, NewSessionRequest::New, Duration::from_secs(5))
+                .expect("failed to initialize proxy connection");
+        *proxy_connection = Some(new_connection);
     }
 }
 
@@ -466,35 +472,34 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
     tracing::debug!("Process {} forking!.", std::process::id());
 
-    let parent_connection = PROXY_CONNECTION.get().expect("PROXY_CONNECTION not set");
-
-    // After fork, this new connection lives both in the parent and in the child.
-    // The child will have access to cloned file descriptor of the underlying socket.
-    // The parent will close its descriptor at the end of this scope.
-    let new_connection = ProxyConnection::new(
-        parent_connection.proxy_addr(),
-        NewSessionRequest::Forked(parent_connection.layer_id()),
-        Duration::from_secs(5),
-    )
-    .expect("failed to establish proxy connection for child");
-
+    let mut proxy_connection_guard = PROXY_CONNECTION
+        .write()
+        .expect("PROXY_CONNECTION write lock failed");
+    let proxy_connection = proxy_connection_guard
+        .as_ref()
+        .expect("PROXY_CONNECTION not set");
     let res = FN_FORK();
 
     match res.cmp(&0) {
         Ordering::Equal => {
             tracing::debug!("Child process initializing layer.");
-
-            PROXY_CONNECTION.take();
-            PROXY_CONNECTION
-                .set(new_connection)
-                .expect("setting PROXY_CONNECTION");
-
-            mirrord_layer_entry_point()
+            // After fork, this new connection lives both in the parent and in the child.
+            // The child will have access to cloned file descriptor of the underlying socket.
+            // The parent will close its descriptor at the end of this scope.
+            let new_connection = ProxyConnection::new(
+                proxy_connection.proxy_addr(),
+                NewSessionRequest::Forked(proxy_connection.layer_id()),
+                Duration::from_secs(5),
+            )
+            .expect("failed to establish proxy connection for child");
+            let old = proxy_connection_guard.replace(new_connection);
+            std::mem::forget(old);
         }
         Ordering::Greater => tracing::debug!("Child process id is {res}."),
         Ordering::Less => tracing::debug!("fork failed"),
     }
 
+    tracing::warn!("here!!!");
     res
 }
 

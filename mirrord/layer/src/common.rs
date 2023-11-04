@@ -22,14 +22,12 @@ where
     T: IsLayerRequestWithResponse + Debug,
     T::Response: Debug,
 {
-    // SAFETY: mutation happens only on initialization.
-    unsafe {
-        PROXY_CONNECTION
-            .get()
-            .ok_or(HookError::CannotGetProxyConnection)?
-            .make_request_with_response(request)
-            .map_err(Into::into)
-    }
+    PROXY_CONNECTION
+        .read()?
+        .as_ref()
+        .ok_or(HookError::CannotGetProxyConnection)?
+        .make_request_with_response(request)
+        .map_err(Into::into)
 }
 
 /// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
@@ -37,14 +35,12 @@ where
 pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
     request: T,
 ) -> HookResult<MessageId> {
-    // SAFETY: mutation happens only on initialization.
-    unsafe {
-        PROXY_CONNECTION
-            .get()
-            .ok_or(HookError::CannotGetProxyConnection)?
-            .make_request_no_response(request)
-            .map_err(Into::into)
-    }
+    PROXY_CONNECTION
+        .read()?
+        .as_ref()
+        .ok_or(HookError::CannotGetProxyConnection)?
+        .make_request_no_response(request)
+        .map_err(Into::into)
 }
 
 /// Converts raw pointer values `P` to some other type.
