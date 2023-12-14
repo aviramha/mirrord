@@ -300,6 +300,7 @@ impl ContainerVariant for JobTargetedVariant<'_> {
                                 "name": "mirrord-agent",
                                 "securityContext": {
                                     "runAsGroup": params.gid,
+                                    "runAsNonRoot": true,
                                     "privileged": agent.privileged,
                                     "capabilities": {
                                         "add": get_capabilities(agent),
