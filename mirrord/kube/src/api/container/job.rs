@@ -301,6 +301,7 @@ impl ContainerVariant for JobTargetedVariant<'_> {
                                 "securityContext": {
                                     "runAsGroup": params.gid,
                                     "runAsNonRoot": true,
+                                    "runAsUser": params.gid,
                                     "privileged": agent.privileged,
                                     "capabilities": {
                                         "add": get_capabilities(agent),
