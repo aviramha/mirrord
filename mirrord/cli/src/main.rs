@@ -131,10 +131,9 @@ async fn vpn(_watch: drain::Watch) -> Result<()> {
     let config = LayerConfig::from_env()?;
     let mut analytics = NullReporter::default();
 
-    let (_, mut connection) =
-        create_and_connect(&config, &mut sub_progress, &mut analytics)
-            .await
-            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+    let (_, mut connection) = create_and_connect(&config, &mut sub_progress, &mut analytics)
+        .await
+        .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
     connection
         .sender
@@ -148,7 +147,7 @@ async fn vpn(_watch: drain::Watch) -> Result<()> {
         DaemonMessage::Vpn(ServerVpn::NetworkConfiguration(network_configuration)) => {
             network_configuration
         }
-        _ => unimplemented!("Unexpected response from agent"),
+        x => unimplemented!("Unexpected response from agent {x:?}"),
     };
     let mut config = tun::Configuration::default();
     config
@@ -173,7 +172,7 @@ async fn vpn(_watch: drain::Watch) -> Result<()> {
         receiver: agent_receiver,
     } = connection;
 
-    let agent_receiver =tokio_stream::wrappers::ReceiverStream::new(agent_receiver).fuse();
+    let agent_receiver = tokio_stream::wrappers::ReceiverStream::new(agent_receiver).fuse();
     tokio::pin!(agent_receiver);
 
     loop {

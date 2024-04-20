@@ -20,8 +20,7 @@ use client_connection::AgentTlsConnector;
 use dns::{DnsCommand, DnsWorker};
 use futures::TryFutureExt;
 use mirrord_protocol::{
-    pause::DaemonPauseTarget, vpn::NetworkConfiguration, ClientMessage, DaemonMessage,
-    GetEnvVarsRequest, LogMessage,
+    pause::DaemonPauseTarget, ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage,
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -33,6 +32,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
+use vpn::VpnApi;
 
 use crate::{
     cli::Args,
@@ -70,6 +70,7 @@ mod runtime;
 mod sniffer;
 mod steal;
 mod util;
+mod vpn;
 mod watched_task;
 
 /// Size of [`mpsc`] channels connecting [`TcpStealerApi`] and [`TcpSnifferApi`] with their
@@ -228,6 +229,7 @@ struct ClientConnectionHandler {
     tcp_outgoing_api: TcpOutgoingApi,
     udp_outgoing_api: UdpOutgoingApi,
     dns_api: DnsApi,
+    vpn_api: VpnApi,
     state: State,
 }
 
@@ -252,6 +254,7 @@ impl ClientConnectionHandler {
 
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
         let udp_outgoing_api = UdpOutgoingApi::new(pid);
+        let vpn_api = VpnApi::new(pid);
 
         let client_handler = Self {
             id,
@@ -262,6 +265,7 @@ impl ClientConnectionHandler {
             tcp_outgoing_api,
             udp_outgoing_api,
             dns_api,
+            vpn_api,
             state,
         };
 
@@ -394,6 +398,10 @@ impl ClientConnectionHandler {
                     Ok(message) => self.respond(DaemonMessage::GetAddrInfoResponse(message)).await?,
                     Err(e) => break e,
                 },
+                message = self.vpn_api.daemon_message() => match message{
+                    Ok(message) => self.respond(DaemonMessage::Vpn(message)).await?,
+                    Err(e) => break e,
+                },
                 _ = cancellation_token.cancelled() => return Ok(()),
             }
         };
@@ -511,6 +519,7 @@ impl ClientConnectionHandler {
             }
             ClientMessage::ReadyForLogs => {}
             ClientMessage::Vpn(message) => {
+                self.vpn_api.layer_message(message).await?;
             }
         }
 
