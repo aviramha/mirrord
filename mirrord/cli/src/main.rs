@@ -7,18 +7,22 @@ use std::{collections::HashMap, time::Duration};
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use config::*;
+use connection::create_and_connect;
 use diagnose::diagnose_command;
 use exec::execvp;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
+use futures::{select, SinkExt, StreamExt};
 use k8s_openapi::{
     api::{apps::v1::Deployment, core::v1::Pod},
     Metadata, NamespaceResourceScope,
 };
 use kube::api::ListParams;
 use miette::JSONReportHandler;
-use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
+use mirrord_analytics::{
+    AnalyticsError, AnalyticsReporter, CollectAnalytics, NullReporter, Reporter,
+};
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     LayerConfig, LayerFileConfig,
@@ -31,6 +35,10 @@ use mirrord_kube::{
     error::KubeApiError,
 };
 use mirrord_progress::{Progress, ProgressTracker};
+use mirrord_protocol::{
+    vpn::{ClientVpn, ServerVpn},
+    DaemonMessage,
+};
 use operator::operator_command;
 use semver::Version;
 use serde::de::DeserializeOwned;
@@ -55,7 +63,7 @@ mod verify_config;
 pub(crate) use error::{CliError, Result};
 use verify_config::verify_config;
 
-use crate::util::remove_proxy_env;
+use crate::{connection::AgentConnection, util::remove_proxy_env};
 
 async fn exec_process<P>(
     config: LayerConfig,
@@ -114,6 +122,79 @@ where
         }
     }
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
+}
+
+async fn vpn(_watch: drain::Watch) -> Result<()> {
+    let progress = ProgressTracker::from_env("mirrord vpn");
+
+    let mut sub_progress = progress.subtask("create agent");
+    let config = LayerConfig::from_env()?;
+    let mut analytics = NullReporter::default();
+
+    let (_, mut connection) =
+        create_and_connect(&config, &mut sub_progress, &mut analytics)
+            .await
+            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+
+    connection
+        .sender
+        .send(mirrord_protocol::ClientMessage::Vpn(
+            ClientVpn::GetNetworkConfiguration,
+        ))
+        .await
+        .unwrap();
+
+    let network_configuration = match connection.receiver.recv().await.unwrap() {
+        DaemonMessage::Vpn(ServerVpn::NetworkConfiguration(network_configuration)) => {
+            network_configuration
+        }
+        _ => unimplemented!("Unexpected response from agent"),
+    };
+    let mut config = tun::Configuration::default();
+    config
+        .address(network_configuration.ip)
+        .netmask(network_configuration.net_mask)
+        .destination(network_configuration.gateway)
+        .up();
+
+    #[cfg(target_os = "linux")]
+    config.platform(|config| {
+        config.packet_information(true);
+    });
+
+    let dev = tun::create_as_async(&config).unwrap();
+
+    let (mut write_stream, read_stream) = dev.into_framed().split();
+    let read_stream = read_stream.fuse();
+    tokio::pin!(read_stream);
+
+    let AgentConnection {
+        sender: mut agent_sender,
+        receiver: agent_receiver,
+    } = connection;
+
+    let agent_receiver =tokio_stream::wrappers::ReceiverStream::new(agent_receiver).fuse();
+    tokio::pin!(agent_receiver);
+
+    loop {
+        select! {
+            packet = read_stream.next() => {
+                let packet = packet.unwrap().unwrap();
+                agent_sender.send(mirrord_protocol::ClientMessage::Vpn(ClientVpn::Packet(packet.get_bytes().into()))).await.unwrap();
+            }
+            message = agent_receiver.next() => {
+                match message.unwrap() {
+                    DaemonMessage::Vpn(ServerVpn::Packet(packet)) => {
+                        let packet = tun::TunPacket::new(packet);
+                        write_stream.send(packet).await.unwrap();
+                    }
+                    _ => unimplemented!("Unexpected response from agent"),
+                };
+            }
+        };
+    }
+
+    Ok(())
 }
 
 async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
@@ -440,6 +521,7 @@ fn main() -> miette::Result<()> {
             }
             Commands::Teams => teams::navigate_to_intro().await,
             Commands::Diagnose(args) => diagnose_command(*args).await?,
+            Commands::Vpn => vpn(watch).await?,
         };
         Ok(())
     });

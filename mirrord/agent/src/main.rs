@@ -20,7 +20,8 @@ use client_connection::AgentTlsConnector;
 use dns::{DnsCommand, DnsWorker};
 use futures::TryFutureExt;
 use mirrord_protocol::{
-    pause::DaemonPauseTarget, ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage,
+    pause::DaemonPauseTarget, vpn::NetworkConfiguration, ClientMessage, DaemonMessage,
+    GetEnvVarsRequest, LogMessage,
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -509,6 +510,8 @@ impl ClientConnectionHandler {
                     .await?;
             }
             ClientMessage::ReadyForLogs => {}
+            ClientMessage::Vpn(message) => {
+            }
         }
 
         Ok(true)

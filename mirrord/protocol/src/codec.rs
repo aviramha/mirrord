@@ -12,22 +12,17 @@ use mirrord_macros::protocol_break;
 use semver::VersionReq;
 
 use crate::{
-    dns::{GetAddrInfoRequest, GetAddrInfoResponse},
-    file::{
+    dns::{GetAddrInfoRequest, GetAddrInfoResponse}, file::{
         AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, FdOpenDirRequest,
         GetDEnts64Request, GetDEnts64Response, OpenDirResponse, OpenFileRequest, OpenFileResponse,
         OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
         ReadFileResponse, ReadLimitedFileRequest, SeekFileRequest, SeekFileResponse,
         WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest, XstatFsRequest,
         XstatFsResponse, XstatRequest, XstatResponse,
-    },
-    outgoing::{
+    }, outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
-    },
-    pause::DaemonPauseTarget,
-    tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
-    ResponseError,
+    }, pause::DaemonPauseTarget, tcp::{DaemonTcp, LayerTcp, LayerTcpSteal}, vpn::{ClientVpn, ServerVpn}, ResponseError
 };
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy)]
@@ -103,6 +98,7 @@ pub enum ClientMessage {
     PauseTargetRequest(bool),
     SwitchProtocolVersion(#[bincode(with_serde)] semver::Version),
     ReadyForLogs,
+    Vpn(ClientVpn),
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
@@ -143,6 +139,7 @@ pub enum DaemonMessage {
     GetAddrInfoResponse(GetAddrInfoResponse),
     PauseTarget(DaemonPauseTarget),
     SwitchProtocolVersionResponse(#[bincode(with_serde)] semver::Version),
+    Vpn(ServerVpn),
 }
 
 pub struct ProtocolCodec<I, O> {

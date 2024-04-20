@@ -56,6 +56,9 @@ pub(super) enum Commands {
 
     /// Diagnostic commands
     Diagnose(Box<DiagnoseArgs>),
+
+    /// VPN
+    Vpn
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
