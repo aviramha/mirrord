@@ -1,4 +1,4 @@
-use std::{fmt, thread};
+use std::{fmt, net::Ipv4Addr, thread};
 
 use mirrord_protocol::vpn::{ClientVpn, NetworkConfiguration, ServerVpn};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
@@ -97,6 +97,65 @@ async fn create_raw_socket() -> Result<UdpSocket> {
     socket.set_nonblocking(true)?;
     Ok(tokio::net::UdpSocket::from_std(std::net::UdpSocket::from(socket)).unwrap())
 }
+use std::net::{IpAddr, SocketAddr};
+
+use nix::sys::socket::SockaddrStorage;
+#[tracing::instrument(level = "debug", ret)]
+async fn resolve_interface() -> Result<(IpAddr, IpAddr, IpAddr)> {
+    // Connect to a remote address so we can later get the default network interface.
+    let temporary_socket = UdpSocket::bind("0.0.0.0:0").await?;
+    temporary_socket.connect("8.8.8.8:53").await?;
+
+    // Create comparison address here with `port: 0`, to match the network interface's address of
+    // `sin_port: 0`.
+    let local_address = SocketAddr::new(temporary_socket.local_addr()?.ip(), 0);
+    let raw_local_address = SockaddrStorage::from(local_address);
+
+    // Try to find an interface that matches the local ip we have.
+    let usable_interface = nix::ifaddrs::getifaddrs()?
+        .find(|iface| {
+            (iface
+                .address
+                .map(|addr| addr == raw_local_address)
+                .unwrap_or(false))
+        })
+        .unwrap();
+
+    let ip = usable_interface
+        .address
+        .unwrap()
+        .as_sockaddr_in()
+        .unwrap()
+        .ip()
+        .to_be_bytes()
+        .into();
+    let net_mask = usable_interface
+        .netmask
+        .unwrap()
+        .as_sockaddr_in()
+        .unwrap()
+        .ip()
+        .to_be_bytes()
+        .into();
+    // extracting gateway is more difficult, ugly patch for now.
+    let temp_gateway = usable_interface
+        .address
+        .unwrap()
+        .as_sockaddr_in()
+        .unwrap()
+        .ip()
+        .to_be_bytes();
+
+    let gateway = IpAddr::V4(Ipv4Addr::new(
+        temp_gateway[0],
+        temp_gateway[1],
+        temp_gateway[2],
+        1,
+    ))
+    .into();
+
+    Ok((ip, net_mask, gateway))
+}
 
 /// Handles outgoing connections for one client (layer).
 struct VpnTask {
@@ -174,38 +233,13 @@ impl VpnTask {
             // `io::split`, and put them into respective maps.
             ClientVpn::GetNetworkConfiguration => {
                 // Try to find an interface that matches the local ip we have.
-                let interface = nix::ifaddrs::getifaddrs()
-                    .unwrap()
-                    .find(|iface| (iface.interface_name == "eth0"))
-                    .unwrap();
-                tracing::debug!(?interface, "Found interface");
+                let (ip, net_mask, gateway) = resolve_interface().await.unwrap();
                 self.daemon_tx
                     .send(
                         (ServerVpn::NetworkConfiguration(NetworkConfiguration {
-                            ip: interface
-                                .address
-                                .unwrap()
-                                .as_sockaddr_in()
-                                .unwrap()
-                                .ip()
-                                .to_ne_bytes()
-                                .into(),
-                            net_mask: interface
-                                .netmask
-                                .unwrap()
-                                .as_sockaddr_in()
-                                .unwrap()
-                                .ip()
-                                .to_ne_bytes()
-                                .into(),
-                            gateway: interface
-                                .destination
-                                .unwrap()
-                                .as_sockaddr_in()
-                                .unwrap()
-                                .ip()
-                                .to_ne_bytes()
-                                .into(),
+                            ip,
+                            net_mask,
+                            gateway,
                         })),
                     )
                     .await
