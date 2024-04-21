@@ -123,7 +123,14 @@ impl ContainerVariant for PodVariant<'_> {
                         "command": command_line,
                         "env": env,
                         // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
-                        "resources": resources
+                        "resources": resources,
+                        "securityContext": {
+                            "runAsGroup": params.gid,
+                            "privileged": agent.privileged,
+                            "capabilities": {
+                                "add": get_capabilities(agent),
+                            }
+                        },
                     }
                 ]
             }

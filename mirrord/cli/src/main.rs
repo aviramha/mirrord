@@ -128,7 +128,10 @@ async fn vpn(_watch: drain::Watch) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord vpn");
 
     let mut sub_progress = progress.subtask("create agent");
-    let config = LayerConfig::from_env()?;
+    let mut config = LayerConfig::from_env()?;
+
+    // for iptables, can be dropped probably
+    config.agent.privileged = true;
     let mut analytics = NullReporter::default();
 
     let (_, mut connection) = create_and_connect(&config, &mut sub_progress, &mut analytics)

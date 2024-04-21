@@ -3,7 +3,7 @@ use std::{fmt, io::Read, mem::MaybeUninit, net::Ipv4Addr, thread};
 use mirrord_protocol::vpn::{ClientVpn, NetworkConfiguration, ServerVpn};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tokio::{
-    io::unix::AsyncFd,
+    io::unix::{AsyncFd, AsyncFdReadyGuard},
     net::UdpSocket,
     select,
     sync::mpsc::{self, error::SendError, Receiver, Sender},
@@ -100,20 +100,14 @@ impl AsyncRawSocket {
         })
     }
 
-    pub async fn readable(&self) -> std::io::Result<()> {
-        let mut guard = self.inner.readable().await?;
-        guard.retain_ready();
-        Ok(())
+    pub async fn readable(&self) -> std::io::Result<AsyncFdReadyGuard<Socket>> {
+        self.inner.readable().await
     }
 
     pub async fn read(&self, out: &mut [u8]) -> std::io::Result<usize> {
-        loop {
-            let mut guard = self.inner.readable().await?;
-
-            match guard.try_io(|inner| inner.get_ref().read(out)) {
-                Ok(result) => return result,
-                Err(_would_block) => continue,
-            }
+        match self.inner.get_ref().read(out) {
+            Ok(result) => Ok(result),
+            Err(_would_block) => Ok(0),
         }
     }
 
@@ -254,6 +248,24 @@ impl VpnTask {
 
     /// Runs this task as long as the channels connecting it with [`TcpOutgoingApi`] are open.
     async fn run(mut self) -> Result<()> {
+        // so host won't respond with RST to our packets.
+        // need to do it for UDP as well to avoid ICMP unreachable.
+        let output = std::process::Command::new("iptables")
+            .args([
+                "-A",
+                "OUTPUT",
+                "-p",
+                "tcp",
+                "--tcp-flags",
+                "RST",
+                "RST",
+                "-j",
+                "DROP",
+            ])
+            .output()
+            .unwrap();
+
+        tracing::debug!(?output, "iptables output");
         let (ip, net_mask, gateway) = resolve_interface().await.unwrap();
         let network_configuration = NetworkConfiguration {
             ip,
@@ -279,12 +291,14 @@ impl VpnTask {
 
                 // We have data coming from one of our peers.
                 ready = raw_socket.readable() => {
-                    if let Ok(()) = ready {
-                        let len = raw_socket.read(&mut buffer).await?;
-                        let packet = buffer[..len].to_vec();
-                        self.daemon_tx.send(ServerVpn::Packet(packet)).await.unwrap();
+                    let mut guard = ready.unwrap();
+                    let len = raw_socket.read(&mut buffer).await?;
+                        if len > 0 {
+                            let packet = buffer[..len].to_vec();
+                            self.daemon_tx.send(ServerVpn::Packet(packet)).await.unwrap();
+                        }
+                        guard.clear_ready();
                     }
-                },
             }
         }
     }
