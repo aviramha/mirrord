@@ -1,4 +1,4 @@
-use std::{fmt, net::Ipv4Addr, thread};
+use std::{fmt, io::Read, mem::MaybeUninit, net::Ipv4Addr, thread};
 
 use mirrord_protocol::vpn::{ClientVpn, NetworkConfiguration, ServerVpn};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
@@ -100,7 +100,8 @@ impl AsyncRawSocket {
     }
 
     pub async fn readable(&self) -> std::io::Result<()> {
-        self.inner.readable().await?;
+        let mut guard = self.inner.readable().await?;
+        guard.retain_ready();
         Ok(())
     }
 
@@ -108,7 +109,7 @@ impl AsyncRawSocket {
         loop {
             let mut guard = self.inner.readable().await?;
 
-            match guard.try_io(|inner| inner.get_ref().recv(out)) {
+            match guard.try_io(|inner| inner.get_ref().read(out)) {
                 Ok(result) => return result,
                 Err(_would_block) => continue,
             }
@@ -118,7 +119,7 @@ impl AsyncRawSocket {
     pub async fn write(&self, buf: &[u8]) -> std::io::Result<usize> {
         loop {
             let mut guard = self.inner.writable().await?;
-            match guard.try_io(|inner| inner.get_ref().send_to(buf, self.addr)) {
+            match guard.try_io(|inner| inner.get_ref().send_to(buf, &self.addr)) {
                 Ok(result) => return result,
                 Err(_would_block) => continue,
             }
