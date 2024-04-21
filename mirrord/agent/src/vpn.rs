@@ -3,6 +3,7 @@ use std::{fmt, net::Ipv4Addr, thread};
 use mirrord_protocol::vpn::{ClientVpn, NetworkConfiguration, ServerVpn};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tokio::{
+    io::unix::AsyncFd,
     net::UdpSocket,
     select,
     sync::mpsc::{self, error::SendError, Receiver, Sender},
@@ -84,7 +85,48 @@ impl VpnApi {
     }
 }
 
-async fn create_raw_socket() -> Result<UdpSocket> {
+pub struct AsyncRawSocket {
+    inner: AsyncFd<Socket>,
+    addr: SockAddr,
+}
+
+impl AsyncRawSocket {
+    pub fn new(socket: Socket, addr: SockAddr) -> std::io::Result<Self> {
+        socket.set_nonblocking(true)?;
+        Ok(Self {
+            inner: AsyncFd::new(socket)?,
+            addr,
+        })
+    }
+
+    pub async fn readable(&self) -> std::io::Result<()> {
+        self.inner.readable().await?;
+        Ok(())
+    }
+
+    pub async fn read(&self, out: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            let mut guard = self.inner.readable().await?;
+
+            match guard.try_io(|inner| inner.get_ref().recv(out)) {
+                Ok(result) => return result,
+                Err(_would_block) => continue,
+            }
+        }
+    }
+
+    pub async fn write(&self, buf: &[u8]) -> std::io::Result<usize> {
+        loop {
+            let mut guard = self.inner.writable().await?;
+            match guard.try_io(|inner| inner.get_ref().send_to(buf, self.addr)) {
+                Ok(result) => return result,
+                Err(_would_block) => continue,
+            }
+        }
+    }
+}
+
+async fn create_raw_socket() -> Result<AsyncRawSocket> {
     let index = nix::net::if_::if_nametoindex("eth0").unwrap();
 
     let socket = Socket::new(
@@ -95,7 +137,7 @@ async fn create_raw_socket() -> Result<UdpSocket> {
     let sock_addr = interface_index_to_sock_addr(index.try_into().unwrap());
     socket.bind(&sock_addr)?;
     socket.set_nonblocking(true)?;
-    Ok(tokio::net::UdpSocket::from_std(std::net::UdpSocket::from(socket)).unwrap())
+    Ok(AsyncRawSocket::new(socket, sock_addr).unwrap())
 }
 use std::net::{IpAddr, SocketAddr};
 
@@ -213,7 +255,7 @@ impl VpnTask {
                 // We have data coming from one of our peers.
                 ready = raw_socket.readable() => {
                     if let Ok(()) = ready {
-                        let len = raw_socket.recv(&mut buffer).await?;
+                        let len = raw_socket.read(&mut buffer).await?;
                         let packet = buffer[..len].to_vec();
                         self.daemon_tx.send(ServerVpn::Packet(packet)).await.unwrap();
                     }
@@ -222,11 +264,11 @@ impl VpnTask {
         }
     }
 
-    #[tracing::instrument(level = "trace", ret, err(Debug))]
+    #[tracing::instrument(level = "trace", skip(socket), ret, err(Debug))]
     async fn handle_layer_msg(
         &mut self,
         message: ClientVpn,
-        socket: &mut UdpSocket,
+        socket: &mut AsyncRawSocket,
     ) -> Result<(), SendError<ServerVpn>> {
         match message {
             // We make connection to the requested address, split the stream into halves with
@@ -246,7 +288,7 @@ impl VpnTask {
                     .unwrap();
             }
             ClientVpn::Packet(packet) => {
-                socket.send(&packet).await.unwrap();
+                socket.write(&packet).await.unwrap();
             }
         }
 
