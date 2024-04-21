@@ -89,8 +89,8 @@ async fn create_raw_socket() -> Result<UdpSocket> {
 
     let socket = Socket::new(
         Domain::PACKET,
-        Type::RAW,
-        Some(Protocol::from(libc::ETH_P_ALL)),
+        Type::DGRAM,
+        Some(Protocol::from(libc::ETH_P_IP.to_be())),
     )?;
     let sock_addr = interface_index_to_sock_addr(index.try_into().unwrap());
     socket.bind(&sock_addr)?;
