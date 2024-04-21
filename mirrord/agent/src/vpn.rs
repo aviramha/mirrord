@@ -8,6 +8,7 @@ use tokio::{
     select,
     sync::mpsc::{self, error::SendError, Receiver, Sender},
 };
+use tracing::debug;
 
 use crate::{
     error::Result,
@@ -149,6 +150,8 @@ async fn resolve_interface() -> Result<(IpAddr, IpAddr, IpAddr)> {
     let temporary_socket = UdpSocket::bind("0.0.0.0:0").await?;
     temporary_socket.connect("8.8.8.8:53").await?;
 
+    // trigger data sent to have gateway in ARP cache.
+    let _ = temporary_socket.send(&[0]).await;
     // Create comparison address here with `port: 0`, to match the network interface's address of
     // `sin_port: 0`.
     let local_address = SocketAddr::new(temporary_socket.local_addr()?.ip(), 0);
@@ -216,11 +219,25 @@ impl fmt::Debug for VpnTask {
 fn interface_index_to_sock_addr(index: i32) -> SockAddr {
     let mut addr_storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
     let len = std::mem::size_of::<libc::sockaddr_ll>() as libc::socklen_t;
+    let data = std::fs::read("/proc/net/arp").unwrap();
+    debug!(?data, "arp data");
+    let macs = procfs::net::arp().unwrap();
+    tracing::debug!(?macs, "arp entries");
+    let hw_addr = procfs::net::arp()
+        .unwrap()
+        .into_iter()
+        .find_map(|entry| entry.hw_address)
+        .unwrap();
+
     unsafe {
         let sock_addr = std::ptr::addr_of_mut!(addr_storage) as *mut libc::sockaddr_ll;
         (*sock_addr).sll_family = libc::AF_PACKET as u16;
         (*sock_addr).sll_protocol = (libc::ETH_P_IP as u16).to_be();
         (*sock_addr).sll_ifindex = index;
+        (*sock_addr).sll_halen = 6;
+        (*sock_addr).sll_addr = [
+            hw_addr[0], hw_addr[1], hw_addr[2], hw_addr[3], hw_addr[4], hw_addr[5], 0, 0,
+        ];
     }
 
     unsafe { SockAddr::new(addr_storage, len) }
@@ -237,6 +254,13 @@ impl VpnTask {
 
     /// Runs this task as long as the channels connecting it with [`TcpOutgoingApi`] are open.
     async fn run(mut self) -> Result<()> {
+        let (ip, net_mask, gateway) = resolve_interface().await.unwrap();
+        let network_configuration = NetworkConfiguration {
+            ip,
+            net_mask,
+            gateway,
+        };
+
         let mut raw_socket = create_raw_socket().await.unwrap();
         let mut buffer = [0u8; 1500 * 5];
         loop {
@@ -245,7 +269,7 @@ impl VpnTask {
 
                 message = self.layer_rx.recv() => match message {
                     // We have a message from the layer to be handled.
-                    Some(message) => self.handle_layer_msg(message, &mut raw_socket).await.unwrap(),
+                    Some(message) => self.handle_layer_msg(message, &mut raw_socket, &network_configuration).await.unwrap(),
                     // Our channel with the layer is closed, this task is no longer needed.
                     None => {
                         tracing::trace!("VpnTask -> Channel with the layer is closed, exiting.");
@@ -270,21 +294,14 @@ impl VpnTask {
         &mut self,
         message: ClientVpn,
         socket: &mut AsyncRawSocket,
+        network_configuration: &NetworkConfiguration,
     ) -> Result<(), SendError<ServerVpn>> {
         match message {
             // We make connection to the requested address, split the stream into halves with
             // `io::split`, and put them into respective maps.
             ClientVpn::GetNetworkConfiguration => {
-                // Try to find an interface that matches the local ip we have.
-                let (ip, net_mask, gateway) = resolve_interface().await.unwrap();
                 self.daemon_tx
-                    .send(
-                        (ServerVpn::NetworkConfiguration(NetworkConfiguration {
-                            ip,
-                            net_mask,
-                            gateway,
-                        })),
-                    )
+                    .send((ServerVpn::NetworkConfiguration(network_configuration.clone())))
                     .await
                     .unwrap();
             }
