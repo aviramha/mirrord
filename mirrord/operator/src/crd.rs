@@ -35,6 +35,7 @@ impl TargetCrd {
             Target::Rollout(target) => ("rollout", &target.rollout, &target.container),
             Target::Job(target) => ("job", &target.job, &target.container),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_string(),
+            Target::Unknown => return "unknown".to_string(),
         };
         if let Some(container) = container {
             format!("{}.{}.container.{}", type_name, target, container)

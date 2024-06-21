@@ -564,6 +564,7 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     let mut targets = match &layer_config.operator {
         Some(true) | None => {
             let operator_targets = try { OperatorApi::list_targets(&layer_config).await? };
+            println!("{:?}", operator_targets);
             match operator_targets {
                 Ok(targets) => {
                     // adjust format to match non-operator output

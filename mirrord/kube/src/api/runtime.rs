@@ -297,6 +297,7 @@ impl RuntimeDataProvider for Target {
             Target::Rollout(rollout) => rollout.runtime_data(client, namespace).await,
             Target::Job(job) => job.runtime_data(client, namespace).await,
             Target::Targetless => Err(KubeApiError::MissingRuntimeData),
+            Target::Unknown => Err(KubeApiError::MissingRuntimeData),
         }
     }
 }

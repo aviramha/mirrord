@@ -46,6 +46,7 @@ impl From<Target> for VerifiedTarget {
             Target::Rollout(r) => Self::Rollout(r),
             Target::Job(j) => Self::Job(j),
             Target::Targetless => Self::Targetless,
+            Target::Unknown => unreachable!(),
         }
     }
 }

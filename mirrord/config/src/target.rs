@@ -5,7 +5,7 @@ use std::{
 
 use mirrord_analytics::CollectAnalytics;
 use schemars::{gen::SchemaGenerator, schema::SchemaObject, JsonSchema};
-use serde::{Deserialize, Serialize};
+use serde::{de::IgnoredAny, Deserialize, Serialize};
 
 use self::{deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, rollout::RolloutTarget};
 use crate::{
@@ -195,6 +195,12 @@ mirrord-layer failed to parse the provided target!
     >> check if the provided target is in the correct namespace.
 "#;
 
+pub fn deserialize_ignore_any<'de, D: serde::Deserializer<'de>, T: Default>(
+    deserializer: D,
+) -> Result<T, D::Error> {
+    IgnoredAny::deserialize(deserializer).map(|_| T::default())
+}
+
 /// <!--${internal}-->
 /// ## path
 ///
@@ -231,6 +237,10 @@ pub enum Target {
     /// <!--${internal}-->
     /// Spawn a new pod.
     Targetless,
+
+    /// <!--${internal}-->
+    #[serde(skip_serializing, deserialize_with= "deserialize_ignore_any")]
+    Unknown,
 }
 
 impl FromStr for Target {
@@ -265,7 +275,8 @@ impl Target {
             Target::Job(job) => job.job.clone(),
             Target::Targetless => {
                 unreachable!("this shouldn't happen - called from operator on a flow where it's not targetless.")
-            }
+            },
+            _ => "".to_string()
         }
     }
 }
@@ -321,6 +332,7 @@ impl fmt::Display for Target {
             Target::Deployment(dep) => dep.fmt_display(f),
             Target::Rollout(roll) => roll.fmt_display(f),
             Target::Job(job) => job.fmt_display(f),
+            _ => write!(f, "a")
         }
     }
 }
@@ -333,6 +345,7 @@ impl TargetDisplay for Target {
             Target::Pod(x) => x.target_type(),
             Target::Rollout(x) => x.target_type(),
             Target::Job(x) => x.target_type(),
+            Target::Unknown => "unknown",
         }
     }
 
@@ -343,6 +356,7 @@ impl TargetDisplay for Target {
             Target::Pod(x) => x.target_name(),
             Target::Rollout(x) => x.target_name(),
             Target::Job(x) => x.target_name(),
+            Target::Unknown => "unknown",
         }
     }
 
@@ -353,6 +367,7 @@ impl TargetDisplay for Target {
             Target::Pod(x) => x.container_name(),
             Target::Rollout(x) => x.container_name(),
             Target::Job(x) => x.container_name(),
+            Target::Unknown => None,
         }
     }
 }
@@ -402,7 +417,7 @@ impl CollectAnalytics for &TargetConfig {
                         flags |= TargetAnalyticFlags::CONTAINER;
                     }
                 }
-                Target::Targetless => {
+                Target::Targetless | Target::Unknown => {
                     // Targetless is essentially 0, so no need to set any flags.
                 }
             }
