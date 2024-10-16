@@ -457,6 +457,7 @@ fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
 
     let mut hook_manager = HookManager::default();
 
+    
     unsafe { exec_utils::enable_macos_hooks(&mut hook_manager, patch_binaries) };
 
     // we need to hook file access to patch path to our temp bin.
@@ -474,6 +475,9 @@ fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
     SETUP.set(setup).expect("SETUP set failed");
 
     unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
+    unsafe {
+        exec_hooks::hooks::enable_exec_hooks(&mut hook_manager);
+    }
 }
 
 /// Prepares the [`HookManager`] and [`replace!`]s [`libc`] calls with our hooks, according to what

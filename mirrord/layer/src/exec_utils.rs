@@ -62,6 +62,7 @@ pub(crate) unsafe fn enable_macos_hooks(
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
     let patch_binaries = PATCH_BINARIES.get().expect("patch binaries not set");
+
     match sip_patch(path, patch_binaries) {
         Ok(None) => Bypass(NoSipDetected(path.to_string())),
         Ok(Some(new_path)) => Success(new_path),
@@ -133,7 +134,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
 }
 
 /// Verifies that mirrord environment is passed to child process
-fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
+fn intercept_environment(envp_arr: &Nul<*const c_char>, bypass_binary: bool) -> Detour<Argv> {
     let mut c_string_vec = Argv::default();
 
     let mut found_dyld = false;
@@ -145,13 +146,18 @@ fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
         };
 
         if arg_str.split('=').next() == Some("DYLD_INSERT_LIBRARIES") {
-            found_dyld = true;
+            if bypass_binary {
+                continue
+            }
+            else {
+                found_dyld = true;
+            }
         }
 
         c_string_vec.push(CString::new(arg_str)?)
     }
 
-    if !found_dyld {
+    if !found_dyld && !bypass_binary {
         for (key, value) in crate::setup().env_backup() {
             c_string_vec.push(CString::new(format!("{key}={value}"))?);
         }
@@ -163,7 +169,7 @@ fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
 /// in any of the arguments, remove it and leave only the original path of the file. If for example
 /// `argv[1]` is `"/tmp/mirrord-bin/bin/bash"`, create a new `argv` where `argv[1]` is
 /// `"/bin/bash"`.
-#[tracing::instrument(level = "trace", skip_all, ret)]
+#[mirrord_layer_macro::instrument(level = "trace", skip_all, ret)]
 pub(crate) unsafe fn patch_sip_for_new_process(
     path: *const c_char,
     argv: *const *const c_char,
@@ -175,21 +181,49 @@ pub(crate) unsafe fn patch_sip_for_new_process(
     trace!("Executable {} called execve/posix_spawn", calling_exe);
 
     let path_str = path.checked_into()?;
+    
     // If an application is trying to run an executable from our tmp dir, strip our tmp dir from the
     // path. The file might not even exist in our tmp dir, and the application is expecting it there
     // only because it somehow found out about its own patched location in our tmp dir.
     // If original path is SIP, and actually exists in our dir that patched executable will be used.
     let path_str = strip_mirrord_path(path_str).unwrap_or(path_str);
-    let path_c_string = patch_if_sip(path_str)
+
+    const BYPASS_BINARIES: &[&str] = &[
+        "/uname",
+        "/xcrun",
+        "/as",
+        "/cc",
+        "/ld",
+        "/asm",
+        "/cc1",
+        "/cgo",
+        "/gcc",
+        "/git",
+        "/link",
+        "/rustc",
+        "/compile",
+        "/collect2",
+        "/xcrun",
+        "/xcode-select",
+        "/dsymutil",
+        "/strip"
+    ];
+    let bypass_binary = BYPASS_BINARIES.iter().any(|bin| path_str.ends_with(bin));
+
+    let path_c_string = if bypass_binary {
+        CString::new(path_str.to_string())?
+    } else {
+        patch_if_sip(path_str)
         .and_then(|new_path| Success(CString::new(new_path)?))
         // Continue also on error, use original path, don't bypass yet, try cleaning argv.
-        .unwrap_or(CString::new(path_str.to_string())?);
+        .unwrap_or(CString::new(path_str.to_string())?)
+    };
 
     let argv_arr = Nul::new_unchecked(argv);
     let envp_arr = Nul::new_unchecked(envp);
 
     let argv_vec = intercept_tmp_dir(argv_arr)?;
-    let envp_vec = intercept_environment(envp_arr)?;
+    let envp_vec = intercept_environment(envp_arr, bypass_binary)?;
     Success((path_c_string, argv_vec, envp_vec))
 }
 
