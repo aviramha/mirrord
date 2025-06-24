@@ -134,6 +134,9 @@ pub(super) enum Commands {
     /// Run mirrord vpn (alpha).
     #[command(hide = true)]
     Vpn(Box<VpnArgs>),
+
+    /// Start the mirrord MCP server (for advanced use).
+    Mcp,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]

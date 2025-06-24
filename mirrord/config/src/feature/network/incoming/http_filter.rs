@@ -159,6 +159,7 @@ pub struct HttpFilterConfig {
     /// health probe ports don't match, then setting this option will override this behavior.
     ///
     /// Set to [80, 8080] by default.
+    /// If http port is different than default, you should explicitly set the ports here.
     #[config(env = "MIRRORD_HTTP_FILTER_PORTS")]
     pub ports: Option<PortList>,
 }

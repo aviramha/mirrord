@@ -817,6 +817,11 @@ fn main() -> miette::Result<()> {
             }
             Commands::PortForward(args) => port_forward(&args, watch).await?,
             Commands::Vpn(args) => vpn::vpn_command(*args).await?,
+            Commands::Mcp => {
+                mirrord_mcp::start_mcp_server()
+                    .await
+                    .map_err(CliError::from)?;
+            }
         };
 
         Ok(())

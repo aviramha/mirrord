@@ -402,6 +402,10 @@ pub(crate) enum CliError {
 
     #[error("Failed starting a mirrord dump session: {0}")]
     DumpError(String),
+
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    McpError(#[from] mirrord_mcp::McpError),
 }
 
 impl CliError {
