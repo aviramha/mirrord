@@ -274,6 +274,36 @@ impl MirrordExecution {
 
         let encoded_config = config.encode()?;
 
+        // Start debugger if enabled
+        let debugger_addr = if config.experimental.debugger {
+            use crate::debugger::launcher::DebuggerLauncher;
+
+            let mut debugger_progress = progress.subtask("starting debugger");
+
+            match DebuggerLauncher::ensure_running().await {
+                Ok((addr, token)) => {
+                    debugger_progress.success(Some("debugger ready"));
+
+                    // Open browser with token
+                    let url = format!("http://{}/?token={}", addr, token);
+                    if let Err(e) = opener::open(&url) {
+                        debugger_progress.warning(&format!("Failed to open browser: {}", e));
+                        debugger_progress.info(&format!("Open this URL manually: {}", url));
+                    } else {
+                        debugger_progress.info(&format!("Debugger UI: {}", url));
+                    }
+
+                    Some(addr.to_string())
+                }
+                Err(e) => {
+                    debugger_progress.warning(&format!("Failed to start debugger: {}", e));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let mut proxy_command =
             Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
         proxy_command.arg("intproxy");
@@ -296,6 +326,11 @@ impl MirrordExecution {
                 serde_json::to_string(&connect_info)?,
             )
             .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
+
+        // Pass debugger address to intproxy if enabled
+        if let Some(addr) = debugger_addr {
+            proxy_command.env("MIRRORD_DEBUGGER_ADDR", addr);
+        }
 
         #[cfg(unix)]
         unsafe {

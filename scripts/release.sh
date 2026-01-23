@@ -89,7 +89,7 @@ cargo set workspace.package.version "$VERSION"
 cargo update -w -q
 
 # Build changelog
-towncrier build --yes --version "${VERSION}"
+uv run towncrier build --yes --version "${VERSION}"
 
 # Stage all changes
 git add Cargo.toml Cargo.lock changelog.d/ CHANGELOG.md

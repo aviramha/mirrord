@@ -203,6 +203,14 @@ pub(super) enum Commands {
 
     /// Fix issues related to mirrord.
     Fix(FixArgs),
+
+    /// Start the mirrord debugger server (hidden, spawned automatically).
+    #[command(hide = true)]
+    Debugger {
+        /// Port to bind the debugger server (default: random).
+        #[arg(long, default_value_t = 0)]
+        port: u16,
+    },
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]

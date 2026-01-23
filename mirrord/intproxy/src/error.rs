@@ -5,6 +5,7 @@ use thiserror::Error;
 use crate::{
     MainTaskId,
     agent_conn::{AgentConnectionError, AgentConnectionTaskError},
+    debugger_conn::DebuggerConnectionError,
     layer_initializer::LayerInitializerError,
     ping_pong::PingPongError,
     proxies::{
@@ -56,6 +57,8 @@ pub(crate) enum ProxyRuntimeError {
     IncomingProxy(#[from] IncomingProxyError),
     #[error("files proxy failed: {0}")]
     FilesProxy(#[from] FilesProxyError),
+    #[error("debugger connection failed: {0}")]
+    DebuggerConnection(#[from] DebuggerConnectionError),
 }
 
 /// This kind of error causes a total failure of the proxy, meaning that for these errors doesn't

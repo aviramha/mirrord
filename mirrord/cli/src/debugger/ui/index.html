@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>mirrord Debugger</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        header {
+            border-bottom: 2px solid #3c3c3c;
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            font-size: 32px;
+            font-weight: 600;
+            color: #ffffff;
+        }
+
+        .subtitle {
+            color: #858585;
+            margin-top: 8px;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 500;
+            margin-left: 12px;
+        }
+
+        .status.connected {
+            background: #1a472a;
+            color: #4ec9b0;
+        }
+
+        .status.disconnected {
+            background: #4a1a1a;
+            color: #f48771;
+        }
+
+        .intproxy-list {
+            display: grid;
+            gap: 20px;
+        }
+
+        .intproxy-card {
+            background: #252526;
+            border: 1px solid #3c3c3c;
+            border-radius: 8px;
+            padding: 20px;
+            transition: border-color 0.2s;
+        }
+
+        .intproxy-card:hover {
+            border-color: #007acc;
+        }
+
+        .intproxy-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid #3c3c3c;
+        }
+
+        .intproxy-id {
+            font-size: 18px;
+            font-weight: 600;
+            color: #4ec9b0;
+            font-family: 'Courier New', monospace;
+        }
+
+        .intproxy-meta {
+            font-size: 13px;
+            color: #858585;
+        }
+
+        .layers {
+            display: grid;
+            gap: 12px;
+        }
+
+        .layer {
+            background: #2d2d30;
+            border-left: 3px solid #007acc;
+            padding: 12px;
+            border-radius: 4px;
+        }
+
+        .layer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 8px;
+        }
+
+        .process-name {
+            font-size: 16px;
+            font-weight: 500;
+            color: #dcdcaa;
+        }
+
+        .process-pid {
+            font-size: 13px;
+            color: #858585;
+            font-family: 'Courier New', monospace;
+        }
+
+        .process-cmdline {
+            font-size: 12px;
+            color: #9cdcfe;
+            font-family: 'Courier New', monospace;
+            margin-top: 4px;
+            overflow-x: auto;
+            white-space: nowrap;
+        }
+
+        .layer-id {
+            font-size: 12px;
+            color: #858585;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #858585;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .reconnecting-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: #4a1a1a;
+            color: #f48771;
+            padding: 12px;
+            text-align: center;
+            font-size: 14px;
+            font-weight: 500;
+            display: none;
+        }
+
+        .reconnecting-overlay.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="reconnecting-overlay" id="reconnecting">
+        Reconnecting to debugger server...
+    </div>
+
+    <header>
+        <h1>
+            mirrord Debugger
+            <span class="status connected" id="status">Connected</span>
+        </h1>
+        <div class="subtitle">Real-time monitoring of intproxy instances and connected processes</div>
+    </header>
+
+    <main>
+        <div class="intproxy-list" id="intproxy-list">
+            <div class="empty-state">
+                <div class="empty-state-icon">📡</div>
+                <div>No intproxy instances connected</div>
+                <div style="margin-top: 8px; font-size: 13px;">Run a mirrord command to see processes here</div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let ws = null;
+        let reconnectAttempts = 0;
+        const maxReconnectDelay = 5000;
+
+        function connect() {
+            const params = new URLSearchParams(window.location.search);
+            const token = params.get('token');
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws?token=${token}`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                reconnectAttempts = 0;
+                updateConnectionStatus(true);
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                renderIntproxies(data.intproxies);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                updateConnectionStatus(false);
+                scheduleReconnect();
+            };
+        }
+
+        function scheduleReconnect() {
+            const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), maxReconnectDelay);
+            reconnectAttempts++;
+            console.log(`Reconnecting in ${delay}ms...`);
+            setTimeout(connect, delay);
+        }
+
+        function updateConnectionStatus(connected) {
+            const statusEl = document.getElementById('status');
+            const reconnectingEl = document.getElementById('reconnecting');
+
+            if (connected) {
+                statusEl.textContent = 'Connected';
+                statusEl.className = 'status connected';
+                reconnectingEl.classList.remove('show');
+            } else {
+                statusEl.textContent = 'Disconnected';
+                statusEl.className = 'status disconnected';
+                reconnectingEl.classList.add('show');
+            }
+        }
+
+        function renderIntproxies(intproxies) {
+            const listEl = document.getElementById('intproxy-list');
+
+            if (Object.keys(intproxies).length === 0) {
+                listEl.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📡</div>
+                        <div>No intproxy instances connected</div>
+                        <div style="margin-top: 8px; font-size: 13px;">Run a mirrord command to see processes here</div>
+                    </div>
+                `;
+                return;
+            }
+
+            const html = Object.entries(intproxies).map(([id, info]) => {
+                const lastHeartbeat = new Date(info.last_heartbeat * 1000).toLocaleString();
+                const layersHtml = info.layers.length === 0
+                    ? '<div style="color: #858585; font-size: 13px;">No layers connected</div>'
+                    : info.layers.map(layer => `
+                        <div class="layer">
+                            <div class="layer-header">
+                                <span class="process-name">${escapeHtml(layer.process_info.name)}</span>
+                                <span class="process-pid">PID ${layer.process_info.pid}</span>
+                            </div>
+                            <div class="process-cmdline">${escapeHtml(layer.process_info.cmdline.join(' '))}</div>
+                            <div class="layer-id">Layer ID: ${layer.layer_id}</div>
+                        </div>
+                    `).join('');
+
+                return `
+                    <div class="intproxy-card">
+                        <div class="intproxy-header">
+                            <div class="intproxy-id">${escapeHtml(id)}</div>
+                            <div class="intproxy-meta">Port ${info.port} · ${lastHeartbeat}</div>
+                        </div>
+                        <div class="layers">${layersHtml}</div>
+                    </div>
+                `;
+            }).join('');
+
+            listEl.innerHTML = html;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Start connection
+        connect();
+    </script>
+</body>
+</html>

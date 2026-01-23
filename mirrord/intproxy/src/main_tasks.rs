@@ -107,6 +107,7 @@ pub enum MainTaskId {
     AgentConnection,
     FilesProxy,
     LayerConnection(LayerId),
+    DebuggerConnection,
 }
 
 impl fmt::Display for MainTaskId {
@@ -120,6 +121,7 @@ impl fmt::Display for MainTaskId {
             Self::LayerConnection(id) => write!(f, "LAYER_CONNECTION_{}", id.0),
             Self::IncomingProxy => f.write_str("INCOMING_PROXY"),
             Self::FilesProxy => f.write_str("FILES_PROXY"),
+            Self::DebuggerConnection => f.write_str("DEBUGGER_CONNECTION"),
         }
     }
 }

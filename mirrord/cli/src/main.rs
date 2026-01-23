@@ -306,6 +306,7 @@ mod config;
 mod connection;
 mod container;
 mod db_branches;
+mod debugger;
 mod diagnose;
 mod dump;
 mod error;
@@ -1062,6 +1063,11 @@ fn main() -> miette::Result<()> {
                 .await?
             }
             Commands::Fix(args) => fix::fix_command(args).await?,
+            Commands::Debugger { port: _ } => {
+                debugger::launcher::run_debugger()
+                    .await
+                    .map_err(|e| CliError::RuntimeError(e))?;
+            }
         };
 
         Ok(())

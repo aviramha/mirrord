@@ -47,6 +47,7 @@ use crate::{
 
 pub mod agent_conn;
 pub mod background_tasks;
+mod debugger_conn;
 pub mod error;
 mod failover_strategy;
 mod layer_conn;
@@ -67,6 +68,8 @@ struct TaskTxs {
     outgoing: TaskSender<OutgoingProxy>,
     incoming: TaskSender<IncomingProxy>,
     files: TaskSender<FilesProxy>,
+    debugger:
+        Option<TaskSender<RestartableBackgroundTaskWrapper<debugger_conn::DebuggerConnection>>>,
 }
 
 /// This struct contains logic for proxying between multiple layer instances and one agent.
@@ -128,6 +131,9 @@ impl IntProxy {
     ) -> Self {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError> =
             BackgroundTasks::new(agent_conn.connection.tx_handle());
+
+        // Get port before moving listener
+        let intproxy_port = listener.local_addr().map(|addr| addr.port()).unwrap_or(0);
 
         let layer_initializer = background_tasks.register(
             LayerInitializer::new(listener),
@@ -197,6 +203,22 @@ impl IntProxy {
         let mut process_logging_interval = time::interval(process_logging_interval);
         process_logging_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
+        // Register debugger connection if enabled
+        let debugger = if let Ok(debugger_addr) = std::env::var("MIRRORD_DEBUGGER_ADDR") {
+            tracing::debug!("Debugger enabled, connecting to {}", debugger_addr);
+
+            let debugger_task =
+                debugger_conn::DebuggerConnection::new(debugger_addr, intproxy_port);
+            let tx = background_tasks.register_restartable(
+                debugger_task,
+                MainTaskId::DebuggerConnection,
+                Self::CHANNEL_SIZE,
+            );
+            Some(tx)
+        } else {
+            None
+        };
+
         Self {
             any_connection_accepted: false,
             background_tasks,
@@ -209,6 +231,7 @@ impl IntProxy {
                 incoming,
                 ping_pong,
                 files,
+                debugger,
             },
             pending_layers: Default::default(),
             protocol_version: None,
@@ -224,6 +247,26 @@ impl IntProxy {
     /// Check if any layer connections are still alive
     fn has_layer_connections(&self) -> bool {
         !self.task_txs.layers.is_empty()
+    }
+
+    /// Send layer update to the debugger connection (if enabled).
+    async fn update_debugger_layers(&self) {
+        if let Some(debugger_tx) = &self.task_txs.debugger {
+            let layers: Vec<debugger_conn::LayerInfo> = self
+                .connected_layers
+                .iter()
+                .map(|(layer_id, process_info)| debugger_conn::LayerInfo {
+                    layer_id: layer_id.0,
+                    process_info: process_info.into(),
+                })
+                .collect();
+
+            debugger_tx
+                .send(debugger_conn::DebuggerConnectionMessage::LayersUpdate(
+                    layers,
+                ))
+                .await;
+        }
     }
 
     /// Runs the main event loop till a failure or success happens, if the failure is manageable, it
@@ -370,6 +413,9 @@ impl IntProxy {
                         .send(OutgoingProxyMessage::LayerForked(msg))
                         .await;
                 }
+
+                // Notify debugger of new layer
+                self.update_debugger_layers().await;
             }
             ProxyMessage::FromAgent(msg) => self.handle_agent_message(msg).await?,
             ProxyMessage::FromLayer(msg) => {
@@ -438,6 +484,9 @@ impl IntProxy {
                 self.task_txs.layers.remove(&LayerId(id));
                 self.connected_layers.remove(&LayerId(id));
                 self.pending_layers.retain(|(layer_id, _)| layer_id.0 != id);
+
+                // Notify debugger of removed layer
+                self.update_debugger_layers().await;
             }
 
             (task_id, TaskUpdate::Finished(res)) => match res {

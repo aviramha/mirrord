@@ -148,6 +148,18 @@ pub struct ExperimentalConfig {
     ///
     /// Configuration for inspecting and modifying apple variables. macOS only.
     pub applev: Option<AppleVariablesConfig>,
+
+    /// ### _experimental_ debugger {#experimental-debugger}
+    ///
+    /// Enables the mirrord debugger UI - a web-based interface that displays all running
+    /// intproxy instances and their connected processes.
+    ///
+    /// When enabled, a debugger server is spawned on localhost with token-based authentication.
+    /// The browser will automatically open to the debugger UI.
+    ///
+    /// Defaults to `false`.
+    #[config(default = false)]
+    pub debugger: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -172,6 +184,7 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("latency_transmit_delay", self.latency.transmit_delay);
         analytics.add("latency_receive_delay", self.latency.receive_delay);
         analytics.add("applev", self.applev.is_some());
+        analytics.add("debugger", self.debugger);
     }
 }
 
