@@ -4763,7 +4763,6 @@ version = "3.183.0"
 dependencies = [
  "bytes",
  "futures",
- "hostname",
  "http-body-util",
  "hyper 1.8.1",
  "hyper-util",

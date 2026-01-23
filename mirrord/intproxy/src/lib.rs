@@ -269,6 +269,46 @@ impl IntProxy {
         }
     }
 
+    /// Log a message to the debugger (if enabled).
+    async fn log_message_to_debugger(
+        &self,
+        layer_id: u64,
+        direction: debugger_conn::MessageDirection,
+        message: &impl std::fmt::Debug,
+    ) {
+        if let Some(debugger_tx) = &self.task_txs.debugger {
+            use std::time::{SystemTime, UNIX_EPOCH};
+
+            // Get message type name (without full module path)
+            let message_type = format!("{:?}", message)
+                .split('(').next()
+                .unwrap_or("Unknown")
+                .split("::").last()
+                .unwrap_or("Unknown")
+                .to_owned();
+
+            // Estimate length from debug representation
+            let length = format!("{:?}", message).len();
+
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
+
+            let log = debugger_conn::MessageLog {
+                layer_id,
+                direction,
+                message_type,
+                length,
+                timestamp,
+            };
+
+            debugger_tx
+                .send(debugger_conn::DebuggerConnectionMessage::MessageLog(log))
+                .await;
+        }
+    }
+
     /// Runs the main event loop till a failure or success happens, if the failure is manageable, it
     /// goes in failover state starting to update every layer with the error content on every new or
     /// pending task. In failover state it continues to accept connection from layers
@@ -419,6 +459,13 @@ impl IntProxy {
             }
             ProxyMessage::FromAgent(msg) => self.handle_agent_message(msg).await?,
             ProxyMessage::FromLayer(msg) => {
+                // Log message to debugger
+                self.log_message_to_debugger(
+                    msg.layer_id.0,
+                    debugger_conn::MessageDirection::FromLayer,
+                    &msg.message,
+                ).await;
+
                 if !matches!(
                     msg.message,
                     LayerToProxyMessage::File(FileRequest::Close(_) | FileRequest::CloseDir(_))
@@ -434,6 +481,14 @@ impl IntProxy {
                     message_id,
                     layer_id,
                 } = msg;
+
+                // Log message to debugger
+                self.log_message_to_debugger(
+                    layer_id.0,
+                    debugger_conn::MessageDirection::ToLayer,
+                    &message,
+                ).await;
+
                 self.pending_layers.remove(&(layer_id, message_id));
                 if let Some(tx) = self.task_txs.layers.get(&layer_id) {
                     tx.send(LocalMessage {

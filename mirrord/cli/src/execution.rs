@@ -281,11 +281,11 @@ impl MirrordExecution {
             let mut debugger_progress = progress.subtask("starting debugger");
 
             match DebuggerLauncher::ensure_running().await {
-                Ok((addr, token)) => {
+                Ok((http_addr, intproxy_addr, token)) => {
                     debugger_progress.success(Some("debugger ready"));
 
-                    // Open browser with token
-                    let url = format!("http://{}/?token={}", addr, token);
+                    // Open browser with token (use HTTP address)
+                    let url = format!("http://{}/?token={}", http_addr, token);
                     if let Err(e) = opener::open(&url) {
                         debugger_progress.warning(&format!("Failed to open browser: {}", e));
                         debugger_progress.info(&format!("Open this URL manually: {}", url));
@@ -293,7 +293,8 @@ impl MirrordExecution {
                         debugger_progress.info(&format!("Debugger UI: {}", url));
                     }
 
-                    Some(addr.to_string())
+                    // Return intproxy address for env var
+                    Some(intproxy_addr.to_string())
                 }
                 Err(e) => {
                     debugger_progress.warning(&format!("Failed to start debugger: {}", e));

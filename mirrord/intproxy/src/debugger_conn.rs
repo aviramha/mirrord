@@ -17,17 +17,37 @@ use crate::{
     background_tasks::{BackgroundTask, MessageBus, RestartableBackgroundTask},
 };
 
+/// Direction of a message.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum MessageDirection {
+    FromLayer,
+    ToLayer,
+}
+
+/// A logged message (lightweight, no payload data).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageLog {
+    pub layer_id: u64,
+    pub direction: MessageDirection,
+    pub message_type: String,
+    pub length: usize,
+    pub timestamp: u64, // milliseconds since epoch
+}
+
 /// Message sent to the debugger connection task.
 #[derive(Debug, Clone)]
 pub enum DebuggerConnectionMessage {
     /// Update the list of connected layers.
     LayersUpdate(Vec<LayerInfo>),
+    /// Log a message from/to a layer.
+    MessageLog(MessageLog),
 }
 
 /// Process information for the debugger (serializable version).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessInfo {
     pub pid: u64,
+    pub parent_pid: u64,
     pub name: String,
     pub cmdline: Vec<String>,
 }
@@ -36,6 +56,7 @@ impl From<&mirrord_intproxy_protocol::ProcessInfo> for ProcessInfo {
     fn from(info: &mirrord_intproxy_protocol::ProcessInfo) -> Self {
         Self {
             pid: info.pid as u64,
+            parent_pid: info.parent_pid as u64,
             name: info.name.clone(),
             cmdline: info.cmdline.clone(),
         }
@@ -62,6 +83,10 @@ enum IntproxyToDebugger {
     },
     Heartbeat {
         intproxy_id: String,
+    },
+    MessageLog {
+        intproxy_id: String,
+        log: MessageLog,
     },
 }
 
@@ -98,13 +123,9 @@ pub struct DebuggerConnection {
 impl DebuggerConnection {
     /// Create a new debugger connection task.
     pub fn new(debugger_addr: String, port: u16) -> Self {
-        // Generate intproxy ID: hostname-port-random
-        let hostname = hostname::get()
-            .unwrap_or_else(|_| "unknown".into())
-            .to_string_lossy()
-            .to_string();
+        // Generate intproxy ID: port-random
         let random_id: u32 = rand::random();
-        let intproxy_id = format!("{}-{}-{:x}", hostname, port, random_id);
+        let intproxy_id = format!("{}-{:x}", port, random_id);
 
         debug!("Creating debugger connection for intproxy {}", intproxy_id);
 
@@ -178,6 +199,20 @@ impl DebuggerConnection {
         Ok(())
     }
 
+    /// Send message log to the debugger.
+    async fn send_message_log(&mut self, log: MessageLog) -> io::Result<()> {
+        if let Some(ref mut writer) = self.writer {
+            let log_msg = IntproxyToDebugger::MessageLog {
+                intproxy_id: self.intproxy_id.clone(),
+                log,
+            };
+
+            Self::write_message(writer, &log_msg).await?;
+        }
+
+        Ok(())
+    }
+
     /// Read a length-prefixed JSON message.
     async fn read_message<R, T>(reader: &mut R) -> io::Result<T>
     where
@@ -229,6 +264,9 @@ impl BackgroundTask for DebuggerConnection {
                         Some(DebuggerConnectionMessage::LayersUpdate(layers)) => {
                             self.current_layers = layers;
                             self.send_layer_update().await?;
+                        }
+                        Some(DebuggerConnectionMessage::MessageLog(log)) => {
+                            self.send_message_log(log).await?;
                         }
                         None => {
                             debug!("Debugger connection message bus closed, exiting");

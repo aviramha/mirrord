@@ -44,6 +44,10 @@ pub async fn handle_intproxy_connection(stream: TcpStream, state: DebuggerState)
                     IntproxyToDebugger::Heartbeat { intproxy_id: id } => {
                         state.heartbeat(id).await;
                     }
+
+                    IntproxyToDebugger::MessageLog { intproxy_id: _, log } => {
+                        state.log_message(log).await;
+                    }
                 }
             }
 

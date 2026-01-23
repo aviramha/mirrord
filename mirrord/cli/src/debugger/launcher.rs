@@ -12,7 +12,8 @@ use tracing::{debug, info, warn};
 /// Information stored in the debugger lock file.
 #[derive(Debug, Serialize, Deserialize)]
 struct LockFileInfo {
-    addr: SocketAddr,
+    http_addr: SocketAddr,
+    intproxy_addr: SocketAddr,
     pid: u32,
     token: String,
 }
@@ -23,9 +24,9 @@ pub struct DebuggerLauncher;
 impl DebuggerLauncher {
     /// Ensure a debugger instance is running.
     ///
-    /// Returns the debugger address and authentication token.
+    /// Returns (HTTP address for browser, intproxy TCP address, auth token).
     /// If a debugger is already running, reuses it. Otherwise, spawns a new one.
-    pub async fn ensure_running() -> Result<(SocketAddr, String), io::Error> {
+    pub async fn ensure_running() -> Result<(SocketAddr, SocketAddr, String), io::Error> {
         let lock_path = Self::lock_file_path()?;
 
         // Try to read existing lock file
@@ -34,10 +35,10 @@ impl DebuggerLauncher {
                 // Check if the process is still alive
                 if Self::is_process_alive(info.pid) {
                     debug!(
-                        "Reusing existing debugger at {} (PID {})",
-                        info.addr, info.pid
+                        "Reusing existing debugger - HTTP: {}, Intproxy: {} (PID {})",
+                        info.http_addr, info.intproxy_addr, info.pid
                     );
-                    return Ok((info.addr, info.token));
+                    return Ok((info.http_addr, info.intproxy_addr, info.token));
                 } else {
                     warn!("Stale lock file found, cleaning up");
                     let _ = fs::remove_file(&lock_path);
@@ -51,7 +52,9 @@ impl DebuggerLauncher {
     }
 
     /// Spawn a new debugger process.
-    async fn spawn_debugger(lock_path: &PathBuf) -> Result<(SocketAddr, String), io::Error> {
+    async fn spawn_debugger(
+        lock_path: &PathBuf,
+    ) -> Result<(SocketAddr, SocketAddr, String), io::Error> {
         // Get the current executable path (mirrord CLI)
         let exe = std::env::current_exe()?;
 
@@ -66,7 +69,7 @@ impl DebuggerLauncher {
         let pid = child.id();
         debug!("Spawned debugger process with PID {}", pid);
 
-        // Read the address and token from stdout
+        // Read the addresses and token from stdout
         let stdout = child.stdout.take().ok_or_else(|| {
             io::Error::new(io::ErrorKind::Other, "Failed to capture debugger stdout")
         })?;
@@ -75,8 +78,8 @@ impl DebuggerLauncher {
         let mut line = String::new();
         std::io::BufRead::read_line(&mut reader, &mut line)?;
 
-        // Parse output: "addr:token"
-        let parts: Vec<&str> = line.trim().split(':').collect();
+        // Parse output: "http_addr|intproxy_addr|token"
+        let parts: Vec<&str> = line.trim().split('|').collect();
         if parts.len() != 3 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -84,23 +87,30 @@ impl DebuggerLauncher {
             ));
         }
 
-        let addr: SocketAddr = format!("{}:{}", parts[0], parts[1])
+        let http_addr: SocketAddr = parts[0]
+            .parse()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let intproxy_addr: SocketAddr = parts[1]
             .parse()
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         let token = parts[2].to_owned();
 
         // Write lock file
         let lock_info = LockFileInfo {
-            addr,
+            http_addr,
+            intproxy_addr,
             pid,
             token: token.clone(),
         };
         let json = serde_json::to_string(&lock_info)?;
         fs::write(lock_path, json)?;
 
-        info!("Debugger started at {} (PID {})", addr, pid);
+        info!(
+            "Debugger started - HTTP: {}, Intproxy: {} (PID {})",
+            http_addr, intproxy_addr, pid
+        );
 
-        Ok((addr, token))
+        Ok((http_addr, intproxy_addr, token))
     }
 
     /// Check if a process is still alive.
@@ -155,11 +165,11 @@ impl DebuggerLauncher {
 pub async fn run_debugger() -> Result<(), io::Error> {
     use super::start_server;
 
-    let (addr, token) = start_server().await?;
+    let (http_addr, intproxy_addr, token) = start_server().await?;
 
-    // Print address and token to stdout for the launcher to read
-    // Format: "ip:port:token"
-    println!("{}:{}", addr, token);
+    // Print addresses and token to stdout for the launcher to read
+    // Format: "http_addr|intproxy_addr|token"
+    println!("{}|{}|{}", http_addr, intproxy_addr, token);
     io::stdout().flush()?;
 
     // Keep running until interrupted

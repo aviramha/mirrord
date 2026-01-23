@@ -9,6 +9,23 @@ pub type IntproxyId = String;
 /// Unique identifier for a layer connection within an intproxy.
 pub type LayerId = u64;
 
+/// Direction of a message.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum MessageDirection {
+    FromLayer,
+    ToLayer,
+}
+
+/// A logged message (lightweight, no payload data).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageLog {
+    pub layer_id: LayerId,
+    pub direction: MessageDirection,
+    pub message_type: String,
+    pub length: usize,
+    pub timestamp: u64, // milliseconds since epoch
+}
+
 /// Messages sent from intproxy to debugger.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IntproxyToDebugger {
@@ -21,6 +38,11 @@ pub enum IntproxyToDebugger {
     },
     /// Periodic heartbeat to indicate the intproxy is still alive.
     Heartbeat { intproxy_id: IntproxyId },
+    /// Log a message from/to a layer.
+    MessageLog {
+        intproxy_id: IntproxyId,
+        log: MessageLog,
+    },
 }
 
 /// Messages sent from debugger to intproxy.
@@ -38,6 +60,7 @@ pub enum DebuggerToIntproxy {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessInfo {
     pub pid: u64,
+    pub parent_pid: u64,
     pub name: String,
     pub cmdline: Vec<String>,
 }
@@ -46,6 +69,7 @@ impl From<&mirrord_intproxy_protocol::ProcessInfo> for ProcessInfo {
     fn from(info: &mirrord_intproxy_protocol::ProcessInfo) -> Self {
         Self {
             pid: info.pid as u64,
+            parent_pid: info.parent_pid as u64,
             name: info.name.clone(),
             cmdline: info.cmdline.clone(),
         }

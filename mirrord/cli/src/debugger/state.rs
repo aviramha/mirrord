@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::Arc,
     time::{Duration, SystemTime},
 };
@@ -9,13 +9,16 @@ use serde::Serialize;
 use tokio::sync::{RwLock, broadcast};
 use tracing::{debug, trace};
 
-use super::protocol::{IntproxyId, LayerInfo};
+use super::protocol::{IntproxyId, LayerId, LayerInfo, MessageLog};
 
 /// Maximum number of WebSocket clients that can receive broadcast updates.
 const BROADCAST_CAPACITY: usize = 16;
 
 /// Duration after which an intproxy is considered stale (no heartbeat).
 const STALE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Maximum number of messages to keep per layer.
+const MAX_MESSAGES_PER_LAYER: usize = 1000;
 
 /// Shared state tracking all intproxy instances and their layers.
 #[derive(Clone)]
@@ -26,6 +29,8 @@ pub struct DebuggerState {
 
 struct StateInner {
     intproxies: HashMap<IntproxyId, IntproxyInfo>,
+    /// Message logs per layer (cyclic buffer, max 1000 per layer).
+    message_logs: HashMap<LayerId, VecDeque<MessageLog>>,
 }
 
 /// Information about a single intproxy instance.
@@ -39,8 +44,17 @@ pub struct IntproxyInfo {
 
 /// Update message broadcast to WebSocket clients.
 #[derive(Debug, Clone, Serialize)]
-pub struct StateUpdate {
-    pub intproxies: HashMap<IntproxyId, IntproxyInfo>,
+#[serde(tag = "type")]
+pub enum StateUpdate {
+    /// Full state snapshot.
+    Snapshot {
+        intproxies: HashMap<IntproxyId, IntproxyInfo>,
+    },
+    /// New message log for a layer.
+    MessageLog {
+        layer_id: LayerId,
+        log: MessageLog,
+    },
 }
 
 impl DebuggerState {
@@ -51,6 +65,7 @@ impl DebuggerState {
         Self {
             inner: Arc::new(RwLock::new(StateInner {
                 intproxies: HashMap::new(),
+                message_logs: HashMap::new(),
             })),
             update_tx,
         }
@@ -102,6 +117,35 @@ impl DebuggerState {
         }
     }
 
+    /// Log a message from/to a layer.
+    pub async fn log_message(&self, log: MessageLog) {
+        trace!("Logging message for layer {}", log.layer_id);
+
+        let mut inner = self.inner.write().await;
+        let logs = inner.message_logs.entry(log.layer_id).or_insert_with(VecDeque::new);
+
+        // Add to cyclic buffer
+        logs.push_back(log.clone());
+        if logs.len() > MAX_MESSAGES_PER_LAYER {
+            logs.pop_front();
+        }
+
+        drop(inner);
+
+        // Broadcast the message log update
+        let update = StateUpdate::MessageLog {
+            layer_id: log.layer_id,
+            log,
+        };
+        let _ = self.update_tx.send(update);
+    }
+
+    /// Get message logs for a specific layer.
+    pub async fn get_layer_logs(&self, layer_id: LayerId) -> Vec<MessageLog> {
+        let inner = self.inner.read().await;
+        inner.message_logs.get(&layer_id).map(|logs| logs.iter().cloned().collect()).unwrap_or_default()
+    }
+
     /// Remove an intproxy from the state.
     #[allow(dead_code)]
     pub async fn remove_intproxy(&self, id: &IntproxyId) {
@@ -143,7 +187,7 @@ impl DebuggerState {
     /// Get a snapshot of the current state.
     pub async fn snapshot(&self) -> StateUpdate {
         let inner = self.inner.read().await;
-        StateUpdate {
+        StateUpdate::Snapshot {
             intproxies: inner.intproxies.clone(),
         }
     }

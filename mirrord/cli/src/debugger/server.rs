@@ -1,14 +1,16 @@
 use std::{collections::HashMap, net::SocketAddr};
 
 use axum::{
-    Router,
-    extract::{Query, State, WebSocketUpgrade, ws::WebSocket},
+    Json, Router,
+    extract::{Path, Query, State, WebSocketUpgrade, ws::WebSocket},
     http::StatusCode,
     response::{Html, IntoResponse},
     routing::get,
 };
 use tokio::{net::TcpListener, sync::broadcast};
 use tracing::{debug, error, info, trace, warn};
+
+use super::protocol::MessageLog;
 
 use super::{connection::handle_intproxy_connection, state::DebuggerState};
 
@@ -21,18 +23,25 @@ struct ServerState {
 
 /// Start the debugger server.
 ///
-/// Returns the bound address and authentication token.
-pub async fn start_server() -> Result<(SocketAddr, String), std::io::Error> {
+/// Returns (HTTP address for browser, intproxy TCP address, auth token).
+pub async fn start_server() -> Result<(SocketAddr, SocketAddr, String), std::io::Error> {
     // Generate random auth token
     let token = generate_token();
 
-    // Bind to localhost on random port
-    let listener = TcpListener::bind("127.0.0.1:0").await?;
-    let addr = listener.local_addr()?;
-
-    info!("Debugger server starting on {}", addr);
-
     let debugger_state = DebuggerState::new();
+
+    // Bind HTTP server to localhost on random port
+    let http_listener = TcpListener::bind("127.0.0.1:0").await?;
+    let http_addr = http_listener.local_addr()?;
+
+    // Bind intproxy TCP listener to localhost on random port
+    let intproxy_listener = TcpListener::bind("127.0.0.1:0").await?;
+    let intproxy_addr = intproxy_listener.local_addr()?;
+
+    info!(
+        "Debugger server starting - HTTP: {}, Intproxy: {}",
+        http_addr, intproxy_addr
+    );
 
     let server_state = ServerState {
         token: token.clone(),
@@ -40,34 +49,27 @@ pub async fn start_server() -> Result<(SocketAddr, String), std::io::Error> {
     };
 
     // Spawn HTTP server task
-    tokio::spawn(run_http_server(addr, server_state.clone()));
+    tokio::spawn(run_http_server(http_listener, server_state.clone()));
 
     // Spawn intproxy connection acceptor
     tokio::spawn(accept_intproxy_connections(
-        listener,
+        intproxy_listener,
         debugger_state.clone(),
     ));
 
     // Spawn periodic cleanup task
     tokio::spawn(periodic_cleanup(debugger_state));
 
-    Ok((addr, token))
+    Ok((http_addr, intproxy_addr, token))
 }
 
 /// Run the HTTP/WebSocket server.
-async fn run_http_server(addr: SocketAddr, state: ServerState) {
+async fn run_http_server(listener: TcpListener, state: ServerState) {
     let app = Router::new()
         .route("/", get(index_handler))
         .route("/ws", get(websocket_handler))
+        .route("/logs/{layer_id}", get(logs_handler))
         .with_state(state);
-
-    let listener = match tokio::net::TcpListener::bind(addr).await {
-        Ok(l) => l,
-        Err(e) => {
-            error!("Failed to bind HTTP server: {}", e);
-            return;
-        }
-    };
 
     if let Err(e) = axum::serve(listener, app).await {
         error!("HTTP server error: {}", e);
@@ -104,6 +106,23 @@ async fn websocket_handler(
 
     ws.on_upgrade(move |socket| handle_websocket(socket, state.debugger_state))
         .into_response()
+}
+
+/// Handler for getting message logs for a layer (requires token authentication).
+async fn logs_handler(
+    Path(layer_id): Path<u64>,
+    Query(params): Query<HashMap<String, String>>,
+    State(state): State<ServerState>,
+) -> Result<Json<Vec<MessageLog>>, StatusCode> {
+    let provided_token = params.get("token");
+
+    if provided_token != Some(&state.token) {
+        warn!("Unauthorized logs access attempt");
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let logs = state.debugger_state.get_layer_logs(layer_id).await;
+    Ok(Json(logs))
 }
 
 /// Handle an authenticated WebSocket connection.
